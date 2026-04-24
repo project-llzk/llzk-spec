@@ -1,5 +1,8 @@
+//! Semantic abstract syntax tree for `llzk-spec`.
+
 use serde::Serialize;
 
+/// Source location for a user-authored syntax node.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct Span {
     pub start: usize,
@@ -8,17 +11,20 @@ pub struct Span {
     pub column: usize,
 }
 
+/// Identifier with attached source span.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Identifier {
     pub name: String,
     pub span: Span,
 }
 
+/// Parsed top-level document.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Document {
     pub items: Vec<Item>,
 }
 
+/// Top-level declarations accepted by the language.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Item {
@@ -26,6 +32,7 @@ pub enum Item {
     Predicate(PredicateDecl),
 }
 
+/// Contract declaration attached to an LLZK symbol.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ContractDecl {
     pub target: Identifier,
@@ -33,6 +40,7 @@ pub struct ContractDecl {
     pub span: Span,
 }
 
+/// Predicate declaration in block or inline-expression form.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct PredicateDecl {
     pub name: Identifier,
@@ -41,6 +49,7 @@ pub struct PredicateDecl {
     pub span: Span,
 }
 
+/// Predicate body representation.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum PredicateBody {
@@ -48,12 +57,14 @@ pub enum PredicateBody {
     Expr(Expression),
 }
 
+/// Sequence of statements with a lexical scope.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Block {
     pub statements: Vec<Statement>,
     pub span: Span,
 }
 
+/// Statements supported by phase 1 of `llzk-spec`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Statement {
@@ -91,6 +102,7 @@ pub enum Statement {
     },
 }
 
+/// Execution scope qualifier for a statement or block.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Scope {
@@ -99,6 +111,7 @@ pub enum Scope {
     Constrain,
 }
 
+/// Loop invariant declaration attached to a loop label in LLZK IR.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct InvariantDecl {
     pub loop_label: Identifier,
@@ -107,6 +120,7 @@ pub struct InvariantDecl {
     pub span: Span,
 }
 
+/// Expression language used by contracts and predicates.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Expression {
@@ -163,6 +177,7 @@ pub enum Expression {
 }
 
 impl Expression {
+    /// Returns the source span covering the current expression node.
     pub fn span(&self) -> Span {
         match self {
             Self::Conditional { span, .. }
@@ -180,6 +195,7 @@ impl Expression {
     }
 }
 
+/// Supported quantifier kinds.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum QuantifierKind {
@@ -187,6 +203,7 @@ pub enum QuantifierKind {
     Exists,
 }
 
+/// Domain over which a quantifier ranges.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum QuantifierDomain {
@@ -198,6 +215,7 @@ pub enum QuantifierDomain {
     Expr(Box<Expression>),
 }
 
+/// Binary operators recognized by the grammar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BinaryOp {
@@ -218,6 +236,7 @@ pub enum BinaryOp {
     Pow,
 }
 
+/// Unary operators recognized by the grammar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum UnaryOp {

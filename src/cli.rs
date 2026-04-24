@@ -1,3 +1,5 @@
+//! Command-line interface for the `llzk-spec` compiler.
+
 use crate::ast::Document;
 use crate::diagnostic::CompileError;
 use crate::ir::load_ir;
@@ -7,23 +9,30 @@ use clap::{Parser, ValueEnum};
 use std::fs;
 use std::path::PathBuf;
 
+/// Command-line arguments accepted by the compiler binary.
 #[derive(Debug, Parser)]
 #[command(author, version, about)]
 pub struct Args {
+    /// Path to the `llzk-spec` source file.
     pub spec_file: PathBuf,
+    /// Path to the LLZK IR file used for symbol verification.
     pub llzk_ir_file: PathBuf,
+    /// Optional AST output path, or `-` for stdout.
     #[arg(long)]
     pub emit_ast: Option<PathBuf>,
+    /// Output format used when `--emit-ast` is set.
     #[arg(long, default_value = "debug")]
     pub format: EmitFormat,
 }
 
+/// Supported AST serialization formats.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum EmitFormat {
     Debug,
     Json,
 }
 
+/// Runs the CLI pipeline: parse, load IR, verify, and optionally emit the AST.
 pub fn run(args: Args) -> Result<(), CompileError> {
     let spec_source = fs::read_to_string(&args.spec_file)?;
     let ir_source = fs::read_to_string(&args.llzk_ir_file)?;
@@ -42,6 +51,7 @@ pub fn run(args: Args) -> Result<(), CompileError> {
     Ok(())
 }
 
+/// Writes the AST to a file or stdout in the requested format.
 fn write_ast(document: &Document, path: &PathBuf, format: EmitFormat) -> Result<(), CompileError> {
     let payload = match format {
         EmitFormat::Debug => format!("{document:#?}\n"),

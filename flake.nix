@@ -15,24 +15,14 @@
         nixpkgs.follows = "llzk-pkgs/nixpkgs";
         flake-utils.follows = "llzk-pkgs/flake-utils";
         llzk-pkgs.follows = "llzk-pkgs";
-        pcl-mlir-pkg.follows = "pcl-mlir-pkg";
       };
     };
     release-helpers.follows = "llzk-lib/release-helpers";
-    pcl-mlir-pkg = {
-      url = "github:Veridise/pcl-mlir";
-      inputs = {
-        shared-pkgs.follows = "llzk-pkgs";
-        nixpkgs.follows = "llzk-pkgs/nixpkgs";
-        flake-utils.follows = "llzk-pkgs/flake-utils";
-        release-helpers.follows = "release-helpers";
-      };
-    };
   };
 
   nixConfig.bash-prompt = "\\[\\e[0;32m\\][llzk-spec]\\[\\e[m\\] \\[\\e[38;5;244m\\]\\w\\[\\e[m\\] % ";
 
-  outputs = { self, nixpkgs, flake-utils, release-helpers, llzk-pkgs, llzk-lib, pcl-mlir-pkg, rust-overlay }:
+  outputs = { self, nixpkgs, flake-utils, release-helpers, llzk-pkgs, llzk-lib, rust-overlay }:
     {
       overlays.default = final: prev:
         let
@@ -74,8 +64,6 @@
               CXX = "clang++";
               MLIR_SYS_200_PREFIX = "${mlir-with-llvm}";
               TABLEGEN_200_PREFIX = "${mlir-with-llvm}";
-              LLZK_PCL_ROOT = "${pcl-mlir-pkg}";
-              LLZK_PCL_PREFIX = "${final.pcl-mlir}";
               LLZK_SYS_10_PREFIX = "${final.llzk}";
               LIBCLANG_PATH = "${final.llzk-llvmPackages.libclang.lib}/lib";
               RUST_BACKTRACE = "1";
@@ -149,7 +137,11 @@
             shellHook = ''
               set -uo pipefail
               ${createFileCheckSymlink}
+              # set up pre-commit
+              pre-commit install
+
               echo "Welcome to the llzk-spec devshell!"
+              echo "To commit without pre-commit hooks, use \`git commit --no-verify\`"
             '';
           } // pkgs.llzkSharedEnvironment.env // pkgs.llzkSharedEnvironment.devSettings);
         };

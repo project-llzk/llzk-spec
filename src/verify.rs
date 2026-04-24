@@ -1,14 +1,18 @@
+//! Semantic verification for phase 1 of the compiler.
+
 use crate::ast::*;
 use crate::diagnostic::Diagnostic;
 use crate::ir::IrMetadata;
 use std::collections::HashSet;
 
+/// One lexical scope frame for names introduced while verifying a block.
 #[derive(Debug, Default, Clone)]
 struct ScopeFrame {
     values: HashSet<String>,
     predicates: HashSet<String>,
 }
 
+/// Verifies the parsed document against the LLZK IR metadata.
 pub fn verify_document(
     document: &Document,
     ir: &IrMetadata,
@@ -34,6 +38,7 @@ pub fn verify_document(
     }
 }
 
+/// Stateful verifier for a single document.
 struct Verifier<'a> {
     source_name: &'a str,
     ir: &'a IrMetadata,

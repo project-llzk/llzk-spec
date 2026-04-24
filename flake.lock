@@ -29,9 +29,7 @@
           "llzk-pkgs",
           "nixpkgs"
         ],
-        "pcl-mlir-pkg": [
-          "pcl-mlir-pkg"
-        ],
+        "pcl-mlir-pkg": "pcl-mlir-pkg",
         "release-helpers": "release-helpers"
       },
       "locked": {
@@ -86,17 +84,21 @@
     "pcl-mlir-pkg": {
       "inputs": {
         "flake-utils": [
+          "llzk-lib",
           "llzk-pkgs",
           "flake-utils"
         ],
         "nixpkgs": [
+          "llzk-lib",
           "llzk-pkgs",
           "nixpkgs"
         ],
         "release-helpers": [
+          "llzk-lib",
           "release-helpers"
         ],
         "shared-pkgs": [
+          "llzk-lib",
           "llzk-pkgs"
         ]
       },
@@ -153,7 +155,6 @@
           "llzk-pkgs",
           "nixpkgs"
         ],
-        "pcl-mlir-pkg": "pcl-mlir-pkg",
         "release-helpers": [
           "llzk-lib",
           "release-helpers"

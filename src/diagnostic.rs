@@ -1,7 +1,10 @@
+//! Diagnostic and error types for the compiler.
+
 use crate::ast::Span;
 use std::fmt::{self, Display};
 use thiserror::Error;
 
+/// User-facing diagnostic emitted during parsing or semantic verification.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Diagnostic {
     pub source: String,
@@ -10,6 +13,7 @@ pub struct Diagnostic {
 }
 
 impl Diagnostic {
+    /// Creates a new diagnostic message.
     pub fn new(source: impl Into<String>, message: impl Into<String>, span: Option<Span>) -> Self {
         Self {
             source: source.into(),
@@ -32,6 +36,7 @@ impl Display for Diagnostic {
     }
 }
 
+/// Top-level compilation error categories.
 #[derive(Debug, Error)]
 pub enum CompileError {
     #[error(transparent)]
@@ -47,6 +52,7 @@ pub enum CompileError {
 }
 
 impl CompileError {
+    /// Returns any structured diagnostics carried by the error.
     pub fn diagnostics(&self) -> &[Diagnostic] {
         match self {
             Self::Syntax(diagnostic) => std::slice::from_ref(diagnostic),

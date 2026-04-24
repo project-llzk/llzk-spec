@@ -1,14 +1,24 @@
+//! Parsing for the `llzk-spec` language.
+//!
+//! `pest` is responsible for recognizing the concrete syntax described in
+//! [`llzk_spec.pest`](./llzk_spec.pest). This module keeps the handwritten
+//! logic focused on lowering the generated parse tree into the semantic AST
+//! used by the rest of the compiler.
+
 use crate::ast::*;
 use crate::diagnostic::Diagnostic;
 use pest::Parser;
 use pest::Span as PestSpan;
 use pest::iterators::{Pair, Pairs};
+use pest::pratt_parser::{Assoc, Op, PrattParser};
 use pest_derive::Parser;
 
+/// Parser generated from the `llzk-spec` PEG grammar.
 #[derive(Parser)]
-#[grammar = "../llzk-spec.pest"]
+#[grammar = "llzk_spec.pest"]
 struct LlzkSpecParser;
 
+/// Parses a complete `llzk-spec` source file into an AST document.
 pub fn parse_document(source_name: &str, source: &str) -> Result<Document, Diagnostic> {
     let pairs = LlzkSpecParser::parse(Rule::file, source).map_err(|error| {
         let (line, column) = match error.line_col {
@@ -27,14 +37,32 @@ pub fn parse_document(source_name: &str, source: &str) -> Result<Document, Diagn
         )
     })?;
 
-    Lowerer { source_name }.document(pairs)
+    Lowerer::new(source_name).document(pairs)
 }
 
+/// Lowers the `pest` parse tree into the semantic AST.
 struct Lowerer<'a> {
     source_name: &'a str,
+    pratt: PrattParser<Rule>,
 }
 
 impl<'a> Lowerer<'a> {
+    /// Creates a new lowering context for a single source file.
+    fn new(source_name: &'a str) -> Self {
+        let pratt = PrattParser::new()
+            .op(Op::infix(Rule::or_op, Assoc::Left))
+            .op(Op::infix(Rule::and_op, Assoc::Left))
+            .op(Op::infix(Rule::eq_op, Assoc::Left))
+            .op(Op::infix(Rule::rel_op, Assoc::Left))
+            .op(Op::infix(Rule::add_op, Assoc::Left))
+            .op(Op::infix(Rule::mul_op, Assoc::Left))
+            .op(Op::infix(Rule::pow_op, Assoc::Right))
+            .op(Op::prefix(Rule::unary_op));
+
+        Self { source_name, pratt }
+    }
+
+    /// Lowers the top-level file pair into a document.
     fn document(&self, mut pairs: Pairs<'a, Rule>) -> Result<Document, Diagnostic> {
         let file = pairs.next().expect("file pair");
         let items = file
@@ -45,14 +73,17 @@ impl<'a> Lowerer<'a> {
         Ok(Document { items })
     }
 
+    /// Lowers a top-level item.
     fn item(&self, pair: Pair<'a, Rule>) -> Result<Item, Diagnostic> {
         match pair.as_rule() {
+            Rule::item => self.item(pair.into_inner().next().expect("nested item")),
             Rule::contract_decl => Ok(Item::Contract(self.contract_decl(pair)?)),
             Rule::predicate_decl => Ok(Item::Predicate(self.predicate_decl(pair)?)),
             _ => self.unexpected(pair, "item"),
         }
     }
 
+    /// Lowers a contract declaration.
     fn contract_decl(&self, pair: Pair<'a, Rule>) -> Result<ContractDecl, Diagnostic> {
         let span = self.span(pair.as_span());
         let mut inner = pair.into_inner();
@@ -61,6 +92,7 @@ impl<'a> Lowerer<'a> {
         Ok(ContractDecl { target, body, span })
     }
 
+    /// Lowers a predicate declaration in either block or inline-expression form.
     fn predicate_decl(&self, pair: Pair<'a, Rule>) -> Result<PredicateDecl, Diagnostic> {
         let span = self.span(pair.as_span());
         let mut inner = pair.into_inner();
@@ -82,12 +114,14 @@ impl<'a> Lowerer<'a> {
         })
     }
 
+    /// Lowers a parameter list.
     fn param_list(&self, pair: Pair<'a, Rule>) -> Result<Vec<Identifier>, Diagnostic> {
         pair.into_inner()
             .map(|pair| self.identifier(pair))
             .collect()
     }
 
+    /// Lowers a statement block.
     fn block(&self, pair: Pair<'a, Rule>) -> Result<Block, Diagnostic> {
         let span = self.span(pair.as_span());
         let statements = pair
@@ -97,6 +131,7 @@ impl<'a> Lowerer<'a> {
         Ok(Block { statements, span })
     }
 
+    /// Lowers a statement.
     fn statement(&self, pair: Pair<'a, Rule>) -> Result<Statement, Diagnostic> {
         match pair.as_rule() {
             Rule::statement => self.statement(pair.into_inner().next().expect("statement")),
@@ -139,6 +174,7 @@ impl<'a> Lowerer<'a> {
         }
     }
 
+    /// Lowers a scoped statement such as `compute ensure ...`.
     fn scoped_stmt(&self, pair: Pair<'a, Rule>) -> Result<Statement, Diagnostic> {
         let span = self.span(pair.as_span());
         let mut inner = pair.into_inner();
@@ -162,6 +198,7 @@ impl<'a> Lowerer<'a> {
         })
     }
 
+    /// Lowers an invariant declaration.
     fn invariant_decl(&self, pair: Pair<'a, Rule>) -> Result<InvariantDecl, Diagnostic> {
         let span = self.span(pair.as_span());
         let mut inner = pair.into_inner();
@@ -176,6 +213,7 @@ impl<'a> Lowerer<'a> {
         })
     }
 
+    /// Lowers an expression by dispatching to the generated `pest` parse tree.
     fn expression(&self, pair: Pair<'a, Rule>) -> Result<Expression, Diagnostic> {
         match pair.as_rule() {
             Rule::expression => self.expression(pair.into_inner().next().expect("expression")),
@@ -185,9 +223,9 @@ impl<'a> Lowerer<'a> {
             | Rule::equality_expr
             | Rule::relational_expr
             | Rule::additive_expr
-            | Rule::multiplicative_expr => self.binary_expression(pair),
-            Rule::power_expr => self.power_expression(pair),
-            Rule::unary_expr => self.unary_expression(pair),
+            | Rule::multiplicative_expr
+            | Rule::power_expr
+            | Rule::unary_expr => self.pratt_expression(pair),
             Rule::postfix_expr => self.postfix_expression(pair),
             Rule::primary_expr => self.expression(pair.into_inner().next().expect("primary expr")),
             Rule::quantifier_expr => self.quantifier_expression(pair),
@@ -215,6 +253,7 @@ impl<'a> Lowerer<'a> {
         }
     }
 
+    /// Lowers a conditional expression, using `pest` for the condition subtree.
     fn conditional_expression(&self, pair: Pair<'a, Rule>) -> Result<Expression, Diagnostic> {
         let span = self.span(pair.as_span());
         let mut inner = pair.into_inner();
@@ -232,80 +271,54 @@ impl<'a> Lowerer<'a> {
         }
     }
 
-    fn binary_expression(&self, pair: Pair<'a, Rule>) -> Result<Expression, Diagnostic> {
-        let span = self.span(pair.as_span());
-        let mut inner = pair.into_inner();
-        let mut expr = self.expression(inner.next().expect("binary lhs"))?;
-        while let Some(op_pair) = inner.next() {
-            let right = self.expression(inner.next().expect("binary rhs"))?;
-            expr = Expression::Binary {
-                op: self.binary_op(op_pair.as_rule(), op_pair.as_str())?,
-                left: Box::new(expr),
-                right: Box::new(right),
-                span,
-            };
-        }
-        Ok(expr)
-    }
-
-    fn power_expression(&self, pair: Pair<'a, Rule>) -> Result<Expression, Diagnostic> {
-        let span = self.span(pair.as_span());
-        let mut inner = pair.into_inner();
-        let left = self.expression(inner.next().expect("power lhs"))?;
-        if let Some(op_pair) = inner.next() {
-            let right = self.expression(inner.next().expect("power rhs"))?;
-            Ok(Expression::Binary {
-                op: self.binary_op(op_pair.as_rule(), op_pair.as_str())?,
-                left: Box::new(left),
-                right: Box::new(right),
-                span,
+    /// Lowers a precedence-sensitive expression using `pest`'s Pratt parser.
+    fn pratt_expression(&self, pair: Pair<'a, Rule>) -> Result<Expression, Diagnostic> {
+        self.pratt
+            .map_primary(|primary| self.expression(primary))
+            .map_prefix(|operator, rhs| {
+                let rhs = rhs?;
+                let rhs_span = rhs.span();
+                let op = match operator.as_str() {
+                    "!" => UnaryOp::Not,
+                    "-" => UnaryOp::Neg,
+                    other => {
+                        return Err(Diagnostic::new(
+                            self.source_name,
+                            format!("unknown unary operator `{other}`"),
+                            Some(self.span(operator.as_span())),
+                        ));
+                    }
+                };
+                Ok(Expression::Unary {
+                    op,
+                    expr: Box::new(rhs),
+                    span: self.join_spans(operator.as_span(), rhs_span),
+                })
             })
-        } else {
-            Ok(left)
-        }
+            .map_infix(|lhs, operator, rhs| {
+                let lhs = lhs?;
+                let rhs = rhs?;
+                let lhs_span = lhs.span();
+                let rhs_span = rhs.span();
+                Ok(Expression::Binary {
+                    op: self.binary_op(operator.as_rule(), operator.as_str())?,
+                    left: Box::new(lhs),
+                    right: Box::new(rhs),
+                    span: self.join_expression_spans(lhs_span, rhs_span),
+                })
+            })
+            .parse(pair.into_inner())
     }
 
-    fn unary_expression(&self, pair: Pair<'a, Rule>) -> Result<Expression, Diagnostic> {
-        let span = self.span(pair.as_span());
-        let mut inner = pair.into_inner().peekable();
-        let mut ops = Vec::new();
-        while inner
-            .peek()
-            .is_some_and(|pair| pair.as_rule() == Rule::unary_op)
-        {
-            let op = match inner.next().expect("unary op").as_str() {
-                "!" => UnaryOp::Not,
-                "-" => UnaryOp::Neg,
-                other => {
-                    return Err(Diagnostic::new(
-                        self.source_name,
-                        format!("unknown unary operator `{other}`"),
-                        Some(span),
-                    ));
-                }
-            };
-            ops.push(op);
-        }
-
-        let mut expr = self.expression(inner.next().expect("unary target"))?;
-        for op in ops.into_iter().rev() {
-            expr = Expression::Unary {
-                op,
-                expr: Box::new(expr),
-                span,
-            };
-        }
-        Ok(expr)
-    }
-
+    /// Lowers a postfix expression such as indexing or predicate calls.
     fn postfix_expression(&self, pair: Pair<'a, Rule>) -> Result<Expression, Diagnostic> {
-        let span = self.span(pair.as_span());
         let mut inner = pair.into_inner();
         let mut expr = self.expression(inner.next().expect("postfix base"))?;
         for suffix in inner {
             match suffix.as_rule() {
                 Rule::index_op => {
                     let index = self.expression(suffix.into_inner().next().expect("index expr"))?;
+                    let span = self.join_expression_spans(expr.span(), index.span());
                     expr = Expression::Index {
                         target: Box::new(expr),
                         index: Box::new(index),
@@ -313,6 +326,7 @@ impl<'a> Lowerer<'a> {
                     };
                 }
                 Rule::call_suffix => {
+                    let suffix_span = suffix.as_span();
                     let args = suffix
                         .into_inner()
                         .map(|pair| self.expression(pair))
@@ -327,6 +341,7 @@ impl<'a> Lowerer<'a> {
                             ));
                         }
                     };
+                    let span = self.join_start_to_suffix(callee.span, suffix_span);
                     expr = Expression::Call { callee, args, span };
                 }
                 _ => return self.unexpected(suffix, "postfix suffix"),
@@ -335,10 +350,11 @@ impl<'a> Lowerer<'a> {
         Ok(expr)
     }
 
+    /// Lowers a quantifier expression and its bound domain.
     fn quantifier_expression(&self, pair: Pair<'a, Rule>) -> Result<Expression, Diagnostic> {
         let span = self.span(pair.as_span());
         let mut inner = pair.into_inner();
-        let kind = match inner.next().expect("quantifier kind").as_str() {
+        let quantifier_kind = match inner.next().expect("quantifier kind").as_str() {
             "forall" => QuantifierKind::Forall,
             "exists" => QuantifierKind::Exists,
             other => {
@@ -353,7 +369,7 @@ impl<'a> Lowerer<'a> {
         let domain = self.quantifier_domain(inner.next().expect("quantifier domain"))?;
         let body = self.expression(inner.next().expect("quantifier body"))?;
         Ok(Expression::Quantifier {
-            quantifier_kind: kind,
+            quantifier_kind,
             binding,
             domain,
             body: Box::new(body),
@@ -361,6 +377,7 @@ impl<'a> Lowerer<'a> {
         })
     }
 
+    /// Lowers a quantifier domain into either a range or general expression.
     fn quantifier_domain(&self, pair: Pair<'a, Rule>) -> Result<QuantifierDomain, Diagnostic> {
         let pair = if pair.as_rule() == Rule::quantifier_domain {
             pair.into_inner().next().expect("quantifier domain body")
@@ -384,6 +401,7 @@ impl<'a> Lowerer<'a> {
         }
     }
 
+    /// Lowers a symbol occurrence into an identifier with source location.
     fn identifier(&self, pair: Pair<'a, Rule>) -> Result<Identifier, Diagnostic> {
         match pair.as_rule() {
             Rule::symbol => Ok(Identifier {
@@ -394,6 +412,7 @@ impl<'a> Lowerer<'a> {
         }
     }
 
+    /// Maps a parsed infix operator token onto the semantic AST operator enum.
     fn binary_op(&self, rule: Rule, text: &str) -> Result<BinaryOp, Diagnostic> {
         let op = match (rule, text) {
             (Rule::or_op, "||") => BinaryOp::Or,
@@ -422,6 +441,7 @@ impl<'a> Lowerer<'a> {
         Ok(op)
     }
 
+    /// Converts a `pest` span into the compiler's source span representation.
     fn span(&self, span: PestSpan<'a>) -> Span {
         let (line, column) = span.start_pos().line_col();
         Span {
@@ -432,6 +452,38 @@ impl<'a> Lowerer<'a> {
         }
     }
 
+    /// Creates a span from the start of one parsed token to the end of another AST node.
+    fn join_spans(&self, start: PestSpan<'a>, end: Span) -> Span {
+        let (line, column) = start.start_pos().line_col();
+        Span {
+            start: start.start(),
+            end: end.end,
+            line,
+            column,
+        }
+    }
+
+    /// Creates a span that covers two AST expressions.
+    fn join_expression_spans(&self, start: Span, end: Span) -> Span {
+        Span {
+            start: start.start,
+            end: end.end,
+            line: start.line,
+            column: start.column,
+        }
+    }
+
+    /// Creates a span from an AST node start to the end of a parsed suffix.
+    fn join_start_to_suffix(&self, start: Span, end: PestSpan<'a>) -> Span {
+        Span {
+            start: start.start,
+            end: end.end(),
+            line: start.line,
+            column: start.column,
+        }
+    }
+
+    /// Builds a consistent "unexpected rule" diagnostic while lowering.
     fn unexpected<T>(&self, pair: Pair<'a, Rule>, expected: &str) -> Result<T, Diagnostic> {
         Err(Diagnostic::new(
             self.source_name,
