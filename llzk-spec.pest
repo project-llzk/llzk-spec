@@ -1,0 +1,267 @@
+// llzk_spec.pest
+
+WHITESPACE = _{ " " | "\t" | NEWLINE }
+NEWLINE    = _{ "\r\n" | "\n" }
+
+COMMENT = _{
+    line_comment
+  | block_comment
+}
+
+line_comment = _{ "//" ~ (!NEWLINE ~ ANY)* }
+block_comment = _{ "/*" ~ (!"*/" ~ ANY)* ~ "*/" }
+
+file = { SOI ~ item* ~ EOI }
+
+item = _{
+    contract_decl
+  | predicate_decl
+}
+
+contract_decl = {
+    "contract" ~ "for" ~ symbol ~ block
+}
+
+predicate_decl = {
+    "predicate" ~ symbol ~ param_list ~ (
+        block_predicate_body
+      | "=" ~ expression ~ semi?
+    )
+}
+
+block_predicate_body = {
+    block
+}
+
+param_list = {
+    "(" ~ (symbol ~ ("," ~ symbol)*)? ~ ")"
+}
+
+block = {
+    "{" ~ statement* ~ "}"
+}
+
+statement = _{
+    scoped_stmt
+  | require_stmt
+  | ensure_stmt
+  | let_stmt
+  | unused_stmt
+  | return_stmt
+  | invariant_decl
+  | predicate_decl
+  | semi
+}
+
+scoped_stmt = {
+    scope_prefix ~ (
+        block
+      | require_stmt
+      | ensure_stmt
+      | let_stmt
+      | unused_stmt
+      | return_stmt
+      | invariant_decl
+    )
+}
+
+scope_prefix = {
+    "compute"
+  | "witness"
+  | "constrain"
+}
+
+require_stmt = {
+    "require" ~ expression ~ semi
+}
+
+ensure_stmt = {
+    "ensure" ~ expression ~ semi
+}
+
+let_stmt = {
+    "let" ~ symbol ~ "=" ~ (nondet_expr | expression) ~ semi
+}
+
+unused_stmt = {
+    "unused" ~ symbol ~ semi
+}
+
+return_stmt = {
+    "return" ~ expression ~ semi
+}
+
+// invariant for <loop_label> (<induction_var>) { /* region */ }
+invariant_decl = {
+    "invariant" ~ "for" ~ symbol ~ "(" ~ symbol ~ ")" ~ block
+}
+
+semi = _{ ";" }
+
+expression = _{ conditional_expr }
+
+conditional_expr = {
+    logical_or_expr ~ ("?" ~ expression ~ ":" ~ expression)?
+}
+
+logical_or_expr = {
+    logical_and_expr ~ (or_op ~ logical_and_expr)*
+}
+
+logical_and_expr = {
+    equality_expr ~ (and_op ~ equality_expr)*
+}
+
+equality_expr = {
+    relational_expr ~ (eq_op ~ relational_expr)*
+}
+
+relational_expr = {
+    additive_expr ~ (rel_op ~ additive_expr)*
+}
+
+additive_expr = {
+    multiplicative_expr ~ (add_op ~ multiplicative_expr)*
+}
+
+multiplicative_expr = {
+    power_expr ~ (mul_op ~ power_expr)*
+}
+
+// Right-associative exponentiation
+power_expr = {
+    unary_expr ~ (pow_op ~ power_expr)?
+}
+
+unary_expr = {
+    unary_op* ~ postfix_expr
+}
+
+postfix_expr = {
+    primary_expr ~ postfix_op*
+}
+
+postfix_op = _{
+    index_op
+  | call_suffix
+}
+
+index_op = {
+    "[" ~ expression ~ "]"
+}
+
+call_suffix = {
+    "(" ~ (expression ~ ("," ~ expression)*)? ~ ")"
+}
+
+primary_expr = _{
+    quantifier_expr
+  | nondet_expr
+  | len_expr
+  | boolean
+  | number
+  | symbol
+  | "(" ~ expression ~ ")"
+}
+
+// Supports:
+// forall i in arr, expr
+// exists i in 0..n, expr
+quantifier_expr = {
+    quantifier_kw ~ symbol ~ "in" ~ quantifier_domain ~ "," ~ expression
+}
+
+quantifier_kw = {
+    "forall"
+  | "exists"
+}
+
+quantifier_domain = {
+    range_expr
+  | expression
+}
+
+// Supports 0..n, (i+1)..N, 0..(N-1), etc.
+range_expr = {
+    expression ~ ".." ~ expression
+}
+
+len_expr = {
+    "len" ~ "(" ~ expression ~ ")"
+}
+
+nondet_expr = {
+    "nondet"
+}
+
+boolean = {
+    "true"
+  | "false"
+}
+
+symbol = @{
+    !reserved_keyword ~ ident
+}
+
+ident = @{
+    (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")*
+}
+
+// "in" is intentionally not reserved globally.
+// It is treated contextually in quantifier_expr.
+reserved_keyword = {
+    "contract"
+  | "for"
+  | "predicate"
+  | "compute"
+  | "witness"
+  | "constrain"
+  | "require"
+  | "ensure"
+  | "let"
+  | "return"
+  | "forall"
+  | "exists"
+  | "unused"
+  | "invariant"
+  | "true"
+  | "false"
+}
+
+number = @{
+    ASCII_DIGIT+
+}
+
+or_op  = { "||" }
+and_op = { "&&" }
+
+eq_op = {
+    "=="
+  | "!="
+}
+
+rel_op = {
+    "<="
+  | ">="
+  | "<"
+  | ">"
+}
+
+add_op = {
+    "+"
+  | "-"
+}
+
+mul_op = {
+    "*"
+  | "/"
+  | "%"
+  | "&"
+}
+
+pow_op = { "**" }
+
+unary_op = {
+    "!"
+  | "-"
+}

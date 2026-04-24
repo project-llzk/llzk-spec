@@ -1,0 +1,20 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v30
+      - name: Pre-commit
+        run: nix develop -c pre-commit run --all-files
+      - name: Build
+        run: nix develop -c cargo build
+      - name: Unit and integration tests
+        run: nix develop -c cargo test
+      - name: Lit tests
+        run: nix develop -c sh -lc 'LLZK_SPEC_BIN=target/debug/llzk-spec lit -a tests/lit'

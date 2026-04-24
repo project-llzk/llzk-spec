@@ -1,0 +1,27 @@
+[package]
+name = "llzk-spec"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "Compiler for the llzk-spec language"
+repository = "https://github.com/project-llzk/llzk-spec"
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+llzk = { git = "https://github.com/project-llzk/llzk-rs", rev = "4001b6891e3e7934816e0afe2cf307aa08dce0f9" }
+melior = "0.25"
+pest = "2.7"
+pest_derive = "2.7"
+regex = "1.11"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+[dev-dependencies]
+assert_cmd = "2.0"
+predicates = "3.1"
+tempfile = "3.15"
+
+[[bin]]
+name = "llzk-spec"
+path = "src/main.rs"
