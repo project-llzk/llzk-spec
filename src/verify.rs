@@ -1,4 +1,5 @@
-//! Semantic verification for phase 1 of the compiler.
+//! Verification methods to ensure the spec lines up with the contents of the
+//! LLZK IR file.
 
 use crate::ast::*;
 use crate::diagnostic::Diagnostic;
@@ -38,24 +39,31 @@ pub fn verify_document(
     }
 }
 
+/// TODO: clarify why this verifier is "stateful". Is that an important detail?
 /// Stateful verifier for a single document.
+// TODO: clarify what is being verified in the documentation
 struct Verifier<'a> {
+    // TODO: document what name this is
     source_name: &'a str,
+    // TODO: document what ir this refers to
     ir: &'a IrMetadata,
+    // TODO: document this and why it is tracked
     diagnostics: Vec<Diagnostic>,
+    // TODO: document this and why it is tracked
     global_predicates: HashSet<String>,
 }
 
+// TODO: add a doc string for all methods
 impl<'a> Verifier<'a> {
     fn collect_global_predicates(&mut self, document: &Document) {
         for item in &document.items {
-            if let Item::Predicate(predicate) = item {
-                if !self.global_predicates.insert(predicate.name.name.clone()) {
-                    self.push(
-                        format!("duplicate predicate `{}`", predicate.name.name),
-                        Some(predicate.name.span),
-                    );
-                }
+            if let Item::Predicate(predicate) = item
+                && !self.global_predicates.insert(predicate.name.name.clone())
+            {
+                self.push(
+                    format!("duplicate predicate `{}`", predicate.name.name),
+                    Some(predicate.name.span),
+                );
             }
         }
     }
@@ -227,12 +235,7 @@ impl<'a> Verifier<'a> {
         }
     }
 
-    fn define_value(
-        &mut self,
-        scopes: &mut Vec<ScopeFrame>,
-        identifier: &Identifier,
-        message: &str,
-    ) {
+    fn define_value(&mut self, scopes: &mut [ScopeFrame], identifier: &Identifier, message: &str) {
         let scope = scopes.last_mut().expect("scope frame");
         if !scope.values.insert(identifier.name.clone()) {
             self.push(

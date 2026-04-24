@@ -78,7 +78,7 @@ Some plain language explanations for the various keywords/constructs in the init
 ### Parsing Expression Grammar (PEG)
 
 
-- **`llzk_spec.pest`**: see [./src/llzk_spec.pest]
+- **`llzk_spec.pest`**: see [./src/grammar/llzk_spec.pest]
 
 
 ### Unsupported/Future Features

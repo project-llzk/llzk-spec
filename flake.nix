@@ -88,13 +88,14 @@
             version = "0.1.0";
             src = ./.;
             nativeBuildInputs = final.llzkSharedEnvironment.nativeBuildInputs;
-            buildInputs = final.llzkSharedEnvironment.devBuildInputs ++ [ final.python3Packages.lit final.pre-commit ];
+            buildInputs = final.llzkSharedEnvironment.devBuildInputs;
             cargoLock = {
               lockFile = ./Cargo.lock;
               allowBuiltinFetchGit = true;
             };
             cargoBuildFlags = [ "--package" "llzk-spec" ];
             cargoTestFlags = [ "--package" "llzk-spec" ];
+            dontUsePytestCheck = true;
           } // final.llzkSharedEnvironment.env // final.llzkSharedEnvironment.pkgSettings);
         };
     } // flake-utils.lib.eachDefaultSystem (
@@ -110,11 +111,6 @@
             release-helpers.overlays.default
           ];
         };
-        createFileCheckSymlink = ''
-          mkdir -p $PWD/build-tools
-          ln -sf "${pkgs.llzk-llvmPackages.llvm}/bin/FileCheck" $PWD/build-tools/FileCheck
-          export PATH="$PWD/build-tools:$PATH"
-        '';
       in {
         packages = flake-utils.lib.flattenTree {
           inherit (pkgs) llzk llzk-debug;
@@ -131,12 +127,10 @@
             nativeBuildInputs = pkgs.llzkSharedEnvironment.nativeBuildInputs;
             buildInputs = pkgs.llzkSharedEnvironment.devBuildInputs ++ [
               pkgs.rust-bin.stable.latest.default
-              pkgs.python3Packages.lit
               pkgs.pre-commit
             ];
             shellHook = ''
               set -uo pipefail
-              ${createFileCheckSymlink}
               # set up pre-commit
               pre-commit install
 

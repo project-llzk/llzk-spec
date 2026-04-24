@@ -60,4 +60,16 @@ impl CompileError {
             _ => &[],
         }
     }
+
+    /// Prints the error in the same diagnostic-oriented format used by the CLI.
+    pub fn print(&self) {
+        let diagnostics = self.diagnostics();
+        if diagnostics.is_empty() {
+            eprintln!("{self}");
+        } else {
+            for diagnostic in diagnostics {
+                eprintln!("{diagnostic}");
+            }
+        }
+    }
 }

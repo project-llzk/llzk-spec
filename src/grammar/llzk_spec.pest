@@ -1,5 +1,3 @@
-// llzk_spec.pest
-
 WHITESPACE = _{ " " | "\t" | NEWLINE }
 NEWLINE    = _{ "\r\n" | "\n" }
 

@@ -1,7 +1,7 @@
 //! Parsing for the `llzk-spec` language.
 //!
 //! `pest` is responsible for recognizing the concrete syntax described in
-//! [`llzk_spec.pest`](./llzk_spec.pest). This module keeps the handwritten
+//! [`llzk_spec.pest`](./grammar/llzk_spec.pest). This module keeps the handwritten
 //! logic focused on lowering the generated parse tree into the semantic AST
 //! used by the rest of the compiler.
 
@@ -15,7 +15,7 @@ use pest_derive::Parser;
 
 /// Parser generated from the `llzk-spec` PEG grammar.
 #[derive(Parser)]
-#[grammar = "llzk_spec.pest"]
+#[grammar = "grammar/llzk_spec.pest"]
 struct LlzkSpecParser;
 
 /// Parses a complete `llzk-spec` source file into an AST document.

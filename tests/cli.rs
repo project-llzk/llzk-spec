@@ -12,8 +12,52 @@ module attributes { llzk.lang } {
       function.return %self : !struct.type<@Foo<[]>>
     }
     function.def @constrain(%arg0: !struct.type<@Foo<[]>>) attributes {function.allow_constraint, function.allow_non_native_field_ops} {
-      "test.loop"() {loop_label = "loop1"} : () -> ()
+      %c0 = arith.constant 0 : index
+      %c1 = arith.constant 1 : index
+      %c2 = arith.constant 2 : index
+      scf.for %i = %c0 to %c2 step %c1 {
+        scf.yield
+      }
       function.return
+    }
+  }
+}
+"#;
+
+const POLY_PARAM_IR: &str = r#"
+module attributes { llzk.lang } {
+  poly.template @tmpl {
+    poly.param @T
+
+    struct.def @empty {
+      function.def @compute() -> !struct.type<@tmpl::@empty<[@T]>> attributes {function.allow_non_native_field_ops, function.allow_witness} {
+        %self = struct.new : <@tmpl::@empty<[@T]>>
+        function.return %self : !struct.type<@tmpl::@empty<[@T]>>
+      }
+      function.def @constrain(%arg0: !struct.type<@tmpl::@empty<[@T]>>) attributes {function.allow_constraint, function.allow_non_native_field_ops} {
+        function.return
+      }
+    }
+  }
+}
+"#;
+
+const POLY_EXPR_IR: &str = r#"
+module attributes { llzk.lang } {
+  poly.template @tmpl {
+    poly.expr @N {
+      %value = arith.constant 42 : index
+      poly.yield %value : index
+    }
+
+    struct.def @empty {
+      function.def @compute() -> !struct.type<@tmpl::@empty<[]>> attributes {function.allow_non_native_field_ops, function.allow_witness} {
+        %self = struct.new : <@tmpl::@empty<[]>>
+        function.return %self : !struct.type<@tmpl::@empty<[]>>
+      }
+      function.def @constrain(%arg0: !struct.type<@tmpl::@empty<[]>>) attributes {function.allow_constraint, function.allow_non_native_field_ops} {
+        function.return
+      }
     }
   }
 }
@@ -26,6 +70,38 @@ fn succeeds_for_valid_spec() {
     let ir = dir.path().join("valid.mlir");
     fs::write(&spec, "contract for Foo { ensure out == 0; }").expect("write spec");
     fs::write(&ir, VALID_IR).expect("write ir");
+
+    Command::cargo_bin("llzk-spec")
+        .expect("binary")
+        .arg(&spec)
+        .arg(&ir)
+        .assert()
+        .success();
+}
+
+#[test]
+fn succeeds_when_spec_references_poly_param_symbol() {
+    let dir = tempdir().expect("tempdir");
+    let spec = dir.path().join("poly-param.spec");
+    let ir = dir.path().join("poly-param.mlir");
+    fs::write(&spec, "contract for empty { ensure T == T; }").expect("write spec");
+    fs::write(&ir, POLY_PARAM_IR).expect("write ir");
+
+    Command::cargo_bin("llzk-spec")
+        .expect("binary")
+        .arg(&spec)
+        .arg(&ir)
+        .assert()
+        .success();
+}
+
+#[test]
+fn succeeds_when_spec_references_poly_expr_symbol() {
+    let dir = tempdir().expect("tempdir");
+    let spec = dir.path().join("poly-expr.spec");
+    let ir = dir.path().join("poly-expr.mlir");
+    fs::write(&spec, "contract for empty { ensure N == N; }").expect("write spec");
+    fs::write(&ir, POLY_EXPR_IR).expect("write ir");
 
     Command::cargo_bin("llzk-spec")
         .expect("binary")
