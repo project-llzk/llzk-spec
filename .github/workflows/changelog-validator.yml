@@ -1,0 +1,17 @@
+name: Changelog
+on:
+  # Require a changelog for any PR going to main.
+  pull_request:
+    branches:
+      - main
+    paths-ignore:
+      - '.github/**'
+      - 'doc/**'
+      - README.md
+
+jobs:
+  validate:
+    uses: project-llzk/open-source-release-helpers/.github/workflows/changelog-validator.yml@main
+    with:
+      branch_name: ${{ github.head_ref }}
+    secrets: inherit

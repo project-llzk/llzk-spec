@@ -92,6 +92,7 @@
             {
               nativeBuildInputs = pkgs.llzkSharedEnvironment.nativeBuildInputs;
               buildInputs = pkgs.llzkSharedEnvironment.devBuildInputs ++ [
+                pkgs.changelogCreator
                 pkgs.nixfmt-rfc-style
                 pkgs.rust-bin.stable.latest.default
                 pkgs.pre-commit

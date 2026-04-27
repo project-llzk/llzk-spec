@@ -1,0 +1,6 @@
+added:
+  - Add the initial `llzk-spec` Rust compiler with parser, AST, diagnostics, LLZK IR metadata loading, semantic verification, and CLI entrypoint.
+  - Add support for contract, predicate, scoped statement, invariant, quantifier, array access, call, and arithmetic expression parsing.
+  - Add AST emission in debug and JSON formats for inspection and end-to-end testing.
+  - Add cargo-integrated lit-style CLI tests with `FileCheck` coverage for success cases, diagnostics, AST emission, symbol visibility, loop labels, and parenthesized expressions.
+  - Add Nix, CI, pre-commit, formatting, clippy, and changelog validation infrastructure for the repository.

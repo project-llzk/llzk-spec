@@ -73,7 +73,7 @@ This milestone is 5 weeks long and is due on May 17, 2026. After this milestone,
 Some plain language explanations for the various keywords/constructs in the initial version of the language.
 
 - `contract for <symbol> {/* region */}`: specifies the specification for the given circuit symbol `<symbol>`
-    - Can be used for function, struct, and channel symbols
+    - Can be used for function and struct symbols
 - `predicate <symbol>(inputs) {/* region */}`:
     - yields a single boolean expression as the predicate value via `return`
     - May be defined within a contract or outside of a contract
