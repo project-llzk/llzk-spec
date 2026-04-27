@@ -12,6 +12,12 @@ repos:
         language: system
         pass_filenames: false
         stages: [pre-commit]
+      - id: nixfmt
+        name: nixfmt
+        entry: nixfmt
+        language: system
+        files: '\.nix$'
+        stages: [pre-commit]
       - id: cargo-clippy
         name: cargo clippy
         entry: cargo clippy
@@ -36,6 +42,12 @@ repos:
         entry: cargo fmt --all -- --check
         language: system
         pass_filenames: false
+        stages: [manual]
+      - id: nixfmt-check
+        name: nixfmt --check
+        entry: nixfmt --check
+        language: system
+        files: '\.nix$'
         stages: [manual]
       - id: cargo-clippy-check
         name: cargo clippy
