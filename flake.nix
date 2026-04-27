@@ -3,26 +3,32 @@
     llzk-pkgs.url = "github:project-llzk/llzk-nix-pkgs";
     nixpkgs.follows = "llzk-pkgs/nixpkgs";
     flake-utils.follows = "llzk-pkgs/flake-utils";
-    rust-overlay = {
-      url = "github:oxalica/rust-overlay";
-      inputs = {
-        nixpkgs.follows = "llzk-pkgs/nixpkgs";
-      };
-    };
-    llzk-lib = {
-      url = "github:project-llzk/llzk-lib";
+    llzk-rs-pkgs = {
+      url = "git+https://github.com/project-llzk/llzk-rs";
       inputs = {
         nixpkgs.follows = "llzk-pkgs/nixpkgs";
         flake-utils.follows = "llzk-pkgs/flake-utils";
         llzk-pkgs.follows = "llzk-pkgs";
       };
     };
-    release-helpers.follows = "llzk-lib/release-helpers";
+    llzk-lib.follows = "llzk-rs-pkgs/llzk-lib";
+    release-helpers.follows = "llzk-rs-pkgs/llzk-lib/release-helpers";
+    rust-overlay.follows = "llzk-rs-pkgs/rust-overlay";
   };
 
+  # Custom colored bash prompt
   nixConfig.bash-prompt = "\\[\\e[0;32m\\][llzk-spec]\\[\\e[m\\] \\[\\e[38;5;244m\\]\\w\\[\\e[m\\] % ";
 
-  outputs = { self, nixpkgs, flake-utils, release-helpers, llzk-pkgs, llzk-lib, rust-overlay }:
+  outputs = {
+      self,
+      nixpkgs,
+      flake-utils,
+      release-helpers,
+      llzk-pkgs,
+      llzk-lib,
+      llzk-rs-pkgs,
+      rust-overlay,
+    }:
     {
       overlays.default = final: prev:
         let

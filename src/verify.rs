@@ -39,22 +39,23 @@ pub fn verify_document(
     }
 }
 
-/// TODO: clarify why this verifier is "stateful". Is that an important detail?
-/// Stateful verifier for a single document.
-// TODO: clarify what is being verified in the documentation
+/// Stateful semantic verifier for a single parsed document.
+///
+/// The verifier is stateful because it accumulates diagnostics and keeps track
+/// of document-wide predicate visibility while walking nested lexical scopes.
 struct Verifier<'a> {
-    // TODO: document what name this is
+    /// Source path/name attached to emitted diagnostics.
     source_name: &'a str,
-    // TODO: document what ir this refers to
+    /// IR metadata used for symbol and loop-label resolution.
     ir: &'a IrMetadata,
-    // TODO: document this and why it is tracked
+    /// Semantic diagnostics accumulated during this verification run.
     diagnostics: Vec<Diagnostic>,
-    // TODO: document this and why it is tracked
+    /// Top-level predicate names pre-collected for duplicate detection and visibility.
     global_predicates: HashSet<String>,
 }
 
-// TODO: add a doc string for all methods
 impl<'a> Verifier<'a> {
+    /// Collects top-level predicate names before verifying bodies.
     fn collect_global_predicates(&mut self, document: &Document) {
         for item in &document.items {
             if let Item::Predicate(predicate) = item
@@ -68,6 +69,7 @@ impl<'a> Verifier<'a> {
         }
     }
 
+    /// Verifies one top-level item in the document.
     fn verify_item(&mut self, item: &Item) {
         match item {
             Item::Contract(contract) => self.verify_contract(contract),
@@ -75,6 +77,7 @@ impl<'a> Verifier<'a> {
         }
     }
 
+    /// Verifies a contract body against IR-visible names and symbols.
     fn verify_contract(&mut self, contract: &ContractDecl) {
         if !self.ir.defined_symbols.contains(&contract.target.name) {
             self.push(
@@ -87,6 +90,7 @@ impl<'a> Verifier<'a> {
         self.verify_block(&contract.body, &mut scopes, false);
     }
 
+    /// Verifies a predicate declaration with inherited outer lexical scopes.
     fn verify_predicate(&mut self, predicate: &PredicateDecl, inherited: &[ScopeFrame]) {
         let mut scopes = inherited.to_vec();
         scopes.push(ScopeFrame::default());
@@ -100,6 +104,7 @@ impl<'a> Verifier<'a> {
         }
     }
 
+    /// Verifies a block inside a fresh lexical scope frame.
     fn verify_block(&mut self, block: &Block, scopes: &mut Vec<ScopeFrame>, in_predicate: bool) {
         scopes.push(ScopeFrame::default());
         for statement in &block.statements {
@@ -108,6 +113,7 @@ impl<'a> Verifier<'a> {
         scopes.pop();
     }
 
+    /// Verifies a single statement and updates lexical scope state as needed.
     fn verify_statement(
         &mut self,
         statement: &Statement,
@@ -172,6 +178,7 @@ impl<'a> Verifier<'a> {
         }
     }
 
+    /// Verifies an expression recursively and reports unresolved names.
     fn verify_expression(&mut self, expression: &Expression, scopes: &mut Vec<ScopeFrame>) {
         match expression {
             Expression::Conditional {
@@ -235,6 +242,7 @@ impl<'a> Verifier<'a> {
         }
     }
 
+    /// Defines a local value in the innermost lexical scope.
     fn define_value(&mut self, scopes: &mut [ScopeFrame], identifier: &Identifier, message: &str) {
         let scope = scopes.last_mut().expect("scope frame");
         if !scope.values.insert(identifier.name.clone()) {
@@ -245,6 +253,7 @@ impl<'a> Verifier<'a> {
         }
     }
 
+    /// Returns whether a name is visible from lexical scopes, predicates, or IR.
     fn name_visible(&self, scopes: &[ScopeFrame], name: &str) -> bool {
         scopes
             .iter()
@@ -254,6 +263,7 @@ impl<'a> Verifier<'a> {
             || self.ir.visible_names.contains(name)
     }
 
+    /// Records a semantic diagnostic for the current source file.
     fn push(&mut self, message: impl Into<String>, span: Option<Span>) {
         self.diagnostics
             .push(Diagnostic::new(self.source_name, message, span));

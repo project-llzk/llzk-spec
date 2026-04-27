@@ -1,0 +1,3 @@
+contract for Foo {
+  ensure ;
+}

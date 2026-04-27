@@ -34,6 +34,34 @@ For Milestone 1 of the LLZK Maintenance Grant, we have committed to delivering t
 - Support for writing specs for ZK DSLs without native specification support
 - Example specifications demonstrating usage in LLZK
 
+## Current Implementation Context
+
+The repository now contains a working Phase 1 `llzk-spec` compiler implemented as a standalone Rust crate.
+
+- The parser is generated with `pest`, using the grammar at [./src/grammar/llzk_spec.pest](./src/grammar/llzk_spec.pest).
+- The compiler pipeline is currently:
+  - parse a `.spec` file into a custom AST
+  - load LLZK IR and extract symbol metadata by walking parsed MLIR operations
+  - verify spec references against that metadata
+  - optionally emit the AST in `debug` or `json` form
+- The project intentionally uses its own `Diagnostic` type as the public/user-facing diagnostic representation.
+  - Parser, verifier, and IR-loading stages all normalize failures into this shared format.
+  - Raw MLIR diagnostics are treated as an internal source of detail, not as the compiler’s public diagnostic API.
+- End-to-end coverage lives in Rust integration tests only.
+  - `tests/cli.rs` is the canonical CLI test suite.
+  - Test fixtures are stored under [./tests/fixtures/cli](./tests/fixtures/cli).
+  - Current CLI coverage includes:
+    - success on a valid `scf.for`-based IR
+    - success on a valid `scf.while`-based IR
+    - syntax errors
+    - missing contract targets
+    - missing loop labels
+    - AST emission
+    - visibility of `poly.param` symbols
+    - visibility of `poly.expr` symbols
+- The old `lit`-based end-to-end suite has been removed.
+  - `cargo test` and `nix build` now rely on the Rust integration tests rather than `lit`/`FileCheck`.
+
 ### Logistics Context
 
 This milestone is 5 weeks long and is due on May 17, 2026. After this milestone, Milestone 2 begins (the creation of the `verif` MLIR dialect, which is what this language will lower to), which lasts for 3 weeks. This timeline should ideally give us time to finish the spec language design early so we can work on the `verif` dialect for spec language → `verif` dialect translation

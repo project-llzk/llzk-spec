@@ -5,6 +5,11 @@ use std::fmt::{self, Display};
 use thiserror::Error;
 
 /// User-facing diagnostic emitted during parsing or semantic verification.
+///
+/// The compiler keeps this custom type as its public diagnostic representation
+/// so parser, verifier, and IR-loading failures share one stable output format.
+/// Raw MLIR diagnostics remain an internal source of detail that can be folded
+/// into these messages later without changing the compiler-facing API.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Diagnostic {
     pub source: String,
