@@ -8,6 +8,7 @@ use crate::diagnostic::CompileError;
 use llzk::context::LlzkContext;
 use llzk::dialect::{
     function::is_func_def,
+    poly::{is_expr_op, is_param_op, is_template_op},
     r#struct::{is_struct_def, is_struct_member},
 };
 use llzk::operation::WalkOperationMutLike;
@@ -54,18 +55,13 @@ fn extract_metadata(module: &mut Module<'_>) -> IrMetadata {
         loop_labels: HashSet::new(),
     };
 
+    // TODO: does this have to be as mut?
     module
         .as_operation_mut()
         .walk_mut(WalkOrder::PreOrder, |operation| {
-            let operation_name = operation.name();
-            let operation_name = operation_name
-                .as_string_ref()
-                .as_str()
-                .expect("valid operation name");
-
             if let Some(symbol_name) = string_attribute(&operation, "sym_name") {
                 metadata.visible_names.insert(symbol_name.clone());
-                if defines_symbol(&operation, operation_name) {
+                if defines_symbol(&operation) {
                     metadata.defined_symbols.insert(symbol_name);
                 }
             }
@@ -93,15 +89,11 @@ fn string_attribute<'c: 'a, 'a>(
 }
 
 /// Returns whether an operation contributes a new named symbol to the module.
-fn defines_symbol<'c: 'a, 'a>(
-    operation: &impl OperationLike<'c, 'a>,
-    operation_name: &str,
-) -> bool {
+fn defines_symbol<'c: 'a, 'a>(operation: &impl OperationLike<'c, 'a>) -> bool {
     is_struct_def(operation)
         || is_struct_member(operation)
         || is_func_def(operation)
-        || matches!(
-            operation_name,
-            "poly.template" | "poly.param" | "poly.expr" | "channel.def"
-        )
+        || is_param_op(operation)
+        || is_expr_op(operation)
+        || is_template_op(operation)
 }
