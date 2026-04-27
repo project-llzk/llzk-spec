@@ -47,9 +47,9 @@ The repository now contains a working Phase 1 `llzk-spec` compiler implemented a
 - The project intentionally uses its own `Diagnostic` type as the public/user-facing diagnostic representation.
   - Parser, verifier, and IR-loading stages all normalize failures into this shared format.
   - Raw MLIR diagnostics are treated as an internal source of detail, not as the compiler’s public diagnostic API.
-- End-to-end coverage lives in Rust integration tests only.
-  - `tests/cli.rs` is the canonical CLI test suite.
-  - Test fixtures are stored under [./tests/fixtures/cli](./tests/fixtures/cli).
+- End-to-end coverage lives in cargo-integrated lit-style Rust integration tests.
+  - `tests/lit.rs` is the Rust harness that discovers and runs `tests/lit/**/*.spec`.
+  - LLZK IR inputs for those tests are stored under [./tests/lit/Inputs](./tests/lit/Inputs).
   - Current CLI coverage includes:
     - success on a valid `scf.for`-based IR
     - success on a valid `scf.while`-based IR
@@ -59,8 +59,8 @@ The repository now contains a working Phase 1 `llzk-spec` compiler implemented a
     - AST emission
     - visibility of `poly.param` symbols
     - visibility of `poly.expr` symbols
-- The old `lit`-based end-to-end suite has been removed.
-  - `cargo test` and `nix build` now rely on the Rust integration tests rather than `lit`/`FileCheck`.
+- The old direct Python `lit` workflow is not used.
+  - `cargo test` and `nix build` run the lit-style tests through Rust.
 
 ### Logistics Context
 
