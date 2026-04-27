@@ -18,5 +18,7 @@ Use the provided Nix shell:
 ```sh
 nix develop
 cargo test
-LLZK_SPEC_BIN=target/debug/llzk-spec lit -a tests/lit
 ```
+
+Lit-style end-to-end tests live under `tests/lit` and are run by `cargo test`.
+The Nix shell provides `FileCheck` for those tests.

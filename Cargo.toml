@@ -21,6 +21,9 @@ assert_cmd = "2.0"
 predicates = "3.1"
 tempfile = "3.15"
 
+[build-dependencies]
+glob = "0.3"
+
 [[bin]]
 name = "llzk-spec"
 path = "src/main.rs"

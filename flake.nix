@@ -61,7 +61,13 @@
               ${final.stdenv.cc}/bin/ar -r "$out/lib/libMLIR.a"
             '';
           };
+          createFileCheckSymlink = ''
+            mkdir -p $PWD/build-tools
+            ln -sf "${final.llzk-llvmPackages.llvm}/bin/FileCheck" $PWD/build-tools/FileCheck
+            export PATH="$PWD/build-tools:$PATH"
+          '';
           llzkSharedEnvironment = {
+            inherit createFileCheckSymlink;
             nativeBuildInputs = with final; [ cmake llzk-llvmPackages.clang ];
             buildInputs = with final; [ libxml2 zlib zstd z3.lib llzk-llvmPackages.libclang.dev ];
             devBuildInputs = with final; [ git ] ++ llzkSharedEnvironment.buildInputs;
@@ -102,6 +108,7 @@
             cargoBuildFlags = [ "--package" "llzk-spec" ];
             cargoTestFlags = [ "--package" "llzk-spec" ];
             dontUsePytestCheck = true;
+            preBuild = createFileCheckSymlink;
           } // final.llzkSharedEnvironment.env // final.llzkSharedEnvironment.pkgSettings);
         };
     } // flake-utils.lib.eachDefaultSystem (
@@ -137,6 +144,7 @@
             ];
             shellHook = ''
               set -uo pipefail
+              ${pkgs.llzkSharedEnvironment.createFileCheckSymlink}
               # set up pre-commit
               pre-commit install
 
