@@ -8,7 +8,7 @@ fn main() -> ExitCode {
     match run(args) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            error.print();
+            eprintln!("{error}");
             ExitCode::FAILURE
         }
     }

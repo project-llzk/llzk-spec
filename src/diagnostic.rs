@@ -41,6 +41,43 @@ impl Display for Diagnostic {
     }
 }
 
+/// A collection of structured diagnostics with CLI-oriented display formatting.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Diagnostics(Vec<Diagnostic>);
+
+impl Diagnostics {
+    /// Returns the diagnostics as a slice for structured consumers.
+    pub fn as_slice(&self) -> &[Diagnostic] {
+        &self.0
+    }
+
+    /// Iterates over the diagnostics in emission order.
+    pub fn iter(&self) -> impl Iterator<Item = &Diagnostic> {
+        self.0.iter()
+    }
+}
+
+impl From<Vec<Diagnostic>> for Diagnostics {
+    fn from(diagnostics: Vec<Diagnostic>) -> Self {
+        Self(diagnostics)
+    }
+}
+
+impl Display for Diagnostics {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            self.0
+                .iter()
+                .map(|d| d.to_string())
+                .collect::<Vec<_>>()
+                .join("\n")
+        )?;
+        Ok(())
+    }
+}
+
 /// Top-level compilation error categories.
 #[derive(Debug, Error)]
 pub enum CompileError {
@@ -52,8 +89,8 @@ pub enum CompileError {
     Usage(String),
     #[error("{0}")]
     Syntax(Diagnostic),
-    #[error("compilation failed")]
-    Diagnostics(Vec<Diagnostic>),
+    #[error("{0}")]
+    Diagnostics(Diagnostics),
 }
 
 impl CompileError {
@@ -61,20 +98,26 @@ impl CompileError {
     pub fn diagnostics(&self) -> &[Diagnostic] {
         match self {
             Self::Syntax(diagnostic) => std::slice::from_ref(diagnostic),
-            Self::Diagnostics(diagnostics) => diagnostics,
+            Self::Diagnostics(diagnostics) => diagnostics.as_slice(),
             _ => &[],
         }
     }
+}
 
-    /// Prints the error in the same diagnostic-oriented format used by the CLI.
-    pub fn print(&self) {
-        let diagnostics = self.diagnostics();
-        if diagnostics.is_empty() {
-            eprintln!("{self}");
-        } else {
-            for diagnostic in diagnostics {
-                eprintln!("{diagnostic}");
-            }
-        }
+#[cfg(test)]
+mod tests {
+    use super::{CompileError, Diagnostic, Diagnostics};
+
+    #[test]
+    fn compile_error_displays_multiple_diagnostics_on_separate_lines() {
+        let error = CompileError::Diagnostics(Diagnostics::from(vec![
+            Diagnostic::new("first.spec", "first failure", None),
+            Diagnostic::new("second.spec", "second failure", None),
+        ]));
+
+        assert_eq!(
+            error.to_string(),
+            "first.spec: first failure\nsecond.spec: second failure"
+        );
     }
 }

@@ -42,7 +42,8 @@ pub fn run(args: Args) -> Result<(), CompileError> {
 
     let document = parse_document(&spec_name, &spec_source).map_err(CompileError::Syntax)?;
     let ir = load_ir(&ir_name, &ir_source)?;
-    verify_document(&document, &ir, &spec_name).map_err(CompileError::Diagnostics)?;
+    verify_document(&document, &ir, &spec_name)
+        .map_err(|diagnostics| CompileError::Diagnostics(diagnostics.into()))?;
 
     if let Some(path) = args.emit_ast {
         write_ast(&document, &path, args.format)?;
