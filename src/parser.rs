@@ -1,9 +1,8 @@
 //! Parsing for the `llzk-spec` language.
 //!
 //! `pest` is responsible for recognizing the concrete syntax described in
-//! [`llzk_spec.pest`](./grammar/llzk_spec.pest). This module keeps the handwritten
-//! logic focused on lowering the generated parse tree into the semantic AST
-//! used by the rest of the compiler.
+//! [`llzk_spec.pest`](./grammar/llzk_spec.pest). The remainder of this module
+//! focuses on lowering the generated parse tree into the llzk-spec AST.
 
 use crate::ast::*;
 use crate::diagnostic::Diagnostic;
@@ -40,7 +39,7 @@ pub fn parse_document(source_name: &str, source: &str) -> Result<Document, Diagn
     Lowerer::new(source_name).document(pairs)
 }
 
-/// Lowers the `pest` parse tree into the semantic AST.
+/// Lowers the `pest` parse tree into the AST.
 struct Lowerer<'a> {
     source_name: &'a str,
     pratt: PrattParser<Rule>,
@@ -179,8 +178,7 @@ impl<'a> Lowerer<'a> {
         let span = self.span(pair.as_span());
         let mut inner = pair.into_inner();
         let scope = match inner.next().expect("scope prefix").as_str() {
-            "compute" => Scope::Compute,
-            "witness" => Scope::Witness,
+            "compute" | "witness" => Scope::Compute,
             "constrain" => Scope::Constrain,
             other => {
                 return Err(Diagnostic::new(
@@ -496,7 +494,7 @@ impl<'a> Lowerer<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{BinaryOp, Expression, Item, QuantifierDomain, Statement};
+    use crate::ast::{BinaryOp, Expression, Item, QuantifierDomain, Scope, Statement};
 
     #[test]
     fn parses_contract_and_predicate_forms() {
@@ -549,5 +547,18 @@ predicate ok(x) { return x == 0; }
             panic!("expected quantifier");
         };
         assert!(matches!(domain, QuantifierDomain::Range { .. }));
+    }
+
+    #[test]
+    fn lowers_witness_scope_to_compute() {
+        let source = "contract for Foo { witness ensure out == 0; }";
+        let document = parse_document("test.spec", source).expect("parse success");
+        let Item::Contract(contract) = &document.items[0] else {
+            panic!("expected contract");
+        };
+        let Statement::Scoped { scope, .. } = &contract.body.statements[0] else {
+            panic!("expected scoped statement");
+        };
+        assert_eq!(*scope, Scope::Compute);
     }
 }

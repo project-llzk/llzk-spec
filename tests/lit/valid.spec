@@ -1,6 +1,6 @@
 // REQUIRES: llzk-spec
-// RUN: %llzk_spec %s %S/Inputs/valid.llzk
-// RUN: %llzk_spec %s %S/Inputs/valid.llzk --emit-ast - --format json | FileCheck %s
+// RUN: %llzk_spec --spec %s --llzk %S/Inputs/valid.llzk
+// RUN: %llzk_spec --spec %s --llzk %S/Inputs/valid.llzk --emit-ast - --format json | FileCheck %s
 // END.
 
 contract for Foo {

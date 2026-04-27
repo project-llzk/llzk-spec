@@ -39,10 +39,7 @@ pub fn verify_document(
     }
 }
 
-/// Stateful semantic verifier for a single parsed document.
-///
-/// The verifier is stateful because it accumulates diagnostics and keeps track
-/// of document-wide predicate visibility while walking nested lexical scopes.
+/// Semantic verifier for a single parsed document.
 struct Verifier<'a> {
     /// Source path/name attached to emitted diagnostics.
     source_name: &'a str,

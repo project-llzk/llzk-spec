@@ -14,8 +14,10 @@ use std::path::PathBuf;
 #[command(author, version, about)]
 pub struct Args {
     /// Path to the `llzk-spec` source file.
+    #[arg(long = "spec", alias = "spec-file", value_name = "SPEC_FILE")]
     pub spec_file: PathBuf,
     /// Path to the LLZK IR file used for symbol verification.
+    #[arg(long = "llzk", alias = "llzk-ir-file", value_name = "LLZK_IR_FILE")]
     pub llzk_ir_file: PathBuf,
     /// Optional AST output path, or `-` for stdout.
     #[arg(long)]
@@ -57,9 +59,8 @@ fn write_ast(document: &Document, path: &PathBuf, format: EmitFormat) -> Result<
     let payload = match format {
         EmitFormat::Debug => format!("{document:#?}\n"),
         EmitFormat::Json => {
-            let mut json = serde_json::to_string_pretty(document).map_err(|error| {
-                CompileError::Usage(format!("failed to serialize AST: {error}"))
-            })?;
+            let mut json =
+                serde_json::to_string_pretty(document).map_err(CompileError::AstSerialization)?;
             json.push('\n');
             json
         }

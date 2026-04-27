@@ -7,8 +7,8 @@ parsed AST for debugging or test assertions.
 ## Usage
 
 ```sh
-llzk-spec path/to/spec.llzk-spec path/to/module.mlir
-llzk-spec path/to/spec.llzk-spec path/to/module.mlir --emit-ast - --format json
+llzk-spec --spec path/to/spec.llzk-spec --llzk path/to/module.mlir
+llzk-spec --spec path/to/spec.llzk-spec --llzk path/to/module.mlir --emit-ast - --format json
 ```
 
 ## Development
@@ -22,3 +22,10 @@ cargo test
 
 Lit-style end-to-end tests live under `tests/lit` and are run by `cargo test`.
 The Nix shell provides `FileCheck` for those tests.
+
+## Repository Layout
+
+- `src/grammar`: pest grammar for the `llzk-spec` language.
+- `src`: parser, AST, diagnostics, IR loading, verification, and CLI code.
+- `tests/lit`: cargo-integrated lit-style end-to-end tests.
+- `tests/lit/Inputs`: LLZK IR inputs used by the lit-style tests.

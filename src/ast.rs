@@ -1,8 +1,8 @@
-//! Semantic abstract syntax tree for `llzk-spec`.
+//! Abstract syntax tree for `llzk-spec`.
 
 use serde::Serialize;
 
-/// Source location for a user-authored syntax node.
+/// Source location of an AST node.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct Span {
     pub start: usize,
@@ -103,11 +103,12 @@ pub enum Statement {
 }
 
 /// Execution scope qualifier for a statement or block.
+///
+/// The source keywords `compute` and `witness` both lower to `Compute`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Scope {
     Compute,
-    Witness,
     Constrain,
 }
 
@@ -203,7 +204,7 @@ pub enum QuantifierKind {
     Exists,
 }
 
-/// Domain over which a quantifier ranges.
+/// Domain over which a quantifier applies.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum QuantifierDomain {

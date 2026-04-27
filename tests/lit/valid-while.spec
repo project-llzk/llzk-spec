@@ -1,5 +1,5 @@
 // REQUIRES: llzk-spec
-// RUN: %llzk_spec %s %S/Inputs/valid-while.llzk
+// RUN: %llzk_spec --spec %s --llzk %S/Inputs/valid-while.llzk
 // END.
 
 contract for Foo {
