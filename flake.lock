@@ -96,15 +96,15 @@
       "locked": {
         "lastModified": 1777040799,
         "narHash": "sha256-fu/3sudcWY4FSouD9KaH3Darn69bJfBWFHenFdpDEvg=",
-        "ref": "refs/heads/main",
+        "owner": "project-llzk",
+        "repo": "llzk-rs",
         "rev": "8ad5bc7da6eda33d022989c7bf1653f54ce68adc",
-        "revCount": 383,
-        "type": "git",
-        "url": "https://github.com/project-llzk/llzk-rs"
+        "type": "github"
       },
       "original": {
-        "type": "git",
-        "url": "https://github.com/project-llzk/llzk-rs"
+        "owner": "project-llzk",
+        "repo": "llzk-rs",
+        "type": "github"
       }
     },
     "nixpkgs": {

@@ -4,7 +4,7 @@
     nixpkgs.follows = "llzk-pkgs/nixpkgs";
     flake-utils.follows = "llzk-pkgs/flake-utils";
     llzk-rs-pkgs = {
-      url = "git+https://github.com/project-llzk/llzk-rs";
+      url = "github:project-llzk/llzk-rs";
       inputs = {
         nixpkgs.follows = "llzk-pkgs/nixpkgs";
         flake-utils.follows = "llzk-pkgs/flake-utils";
