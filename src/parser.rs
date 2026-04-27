@@ -41,7 +41,9 @@ pub fn parse_document(source_name: &str, source: &str) -> Result<Document, Diagn
 
 /// Lowers the `pest` parse tree into the AST.
 struct Lowerer<'a> {
+    /// User-facing source name used in diagnostics, usually the spec file path.
     source_name: &'a str,
+    /// Pratt parser used to lower precedence-sensitive expression subtrees.
     pratt: PrattParser<Rule>,
 }
 
@@ -49,6 +51,8 @@ impl<'a> Lowerer<'a> {
     /// Creates a new lowering context for a single source file.
     fn new(source_name: &'a str) -> Self {
         let pratt = PrattParser::new()
+            // Operators are listed from lowest to highest precedence. `Assoc`
+            // selects how chains at the same precedence group nest.
             .op(Op::infix(Rule::or_op, Assoc::Left))
             .op(Op::infix(Rule::and_op, Assoc::Left))
             .op(Op::infix(Rule::eq_op, Assoc::Left))

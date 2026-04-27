@@ -4,6 +4,20 @@
 `llzk-spec` source files, validates them against an LLZK IR module, and can emit the
 parsed AST for debugging or test assertions.
 
+## Current Features
+
+- Parses `.spec` files into the llzk-spec AST.
+- Loads LLZK IR and extracts symbol, visible name, and loop-label metadata.
+- Verifies contract targets, referenced symbols, and loop labels against LLZK IR metadata.
+- Emits the parsed AST in debug or JSON format.
+- Runs cargo-integrated lit-style end-to-end tests.
+
+## Roadmap
+
+- Lower llzk-spec AST into the future `verif` MLIR dialect.
+- Expand type checking beyond phase-1 symbol and loop-label validation.
+- Add richer diagnostics as the language and lowering pipeline grow.
+
 ## Usage
 
 ```sh
@@ -25,7 +39,7 @@ The Nix shell provides `FileCheck` for those tests.
 
 ## Repository Layout
 
-- `src/grammar`: pest grammar for the `llzk-spec` language.
+- `src/grammar`: [pest](https://github.com/pest-parser/pest) grammar for the `llzk-spec` language.
 - `src`: parser, AST, diagnostics, IR loading, verification, and CLI code.
 - `tests/lit`: cargo-integrated lit-style end-to-end tests.
 - `tests/lit/Inputs`: LLZK IR inputs used by the lit-style tests.

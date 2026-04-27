@@ -239,7 +239,7 @@ impl<'a> Verifier<'a> {
         }
     }
 
-    /// Defines a local value in the innermost lexical scope.
+    /// Defines a local value in the current (innermost) lexical scope.
     fn define_value(&mut self, scopes: &mut [ScopeFrame], identifier: &Identifier, message: &str) {
         let scope = scopes.last_mut().expect("scope frame");
         if !scope.values.insert(identifier.name.clone()) {
@@ -260,7 +260,7 @@ impl<'a> Verifier<'a> {
             || self.ir.visible_names.contains(name)
     }
 
-    /// Records a semantic diagnostic for the current source file.
+    /// Records a diagnostic for the current source file.
     fn push(&mut self, message: impl Into<String>, span: Option<Span>) {
         self.diagnostics
             .push(Diagnostic::new(self.source_name, message, span));

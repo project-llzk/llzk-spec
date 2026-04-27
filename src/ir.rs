@@ -6,6 +6,10 @@
 
 use crate::diagnostic::CompileError;
 use llzk::context::LlzkContext;
+use llzk::dialect::{
+    function::is_func_def,
+    r#struct::{is_struct_def, is_struct_member},
+};
 use llzk::operation::WalkOperationMutLike;
 use melior::{
     dialect::DialectRegistry,
@@ -61,7 +65,7 @@ fn extract_metadata(module: &mut Module<'_>) -> IrMetadata {
 
             if let Some(symbol_name) = string_attribute(&operation, "sym_name") {
                 metadata.visible_names.insert(symbol_name.clone());
-                if defines_symbol(operation_name) {
+                if defines_symbol(&operation, operation_name) {
                     metadata.defined_symbols.insert(symbol_name);
                 }
             }
@@ -89,14 +93,15 @@ fn string_attribute<'c: 'a, 'a>(
 }
 
 /// Returns whether an operation contributes a new named symbol to the module.
-fn defines_symbol(operation_name: &str) -> bool {
-    matches!(
-        operation_name,
-        "poly.template"
-            | "poly.param"
-            | "struct.def"
-            | "struct.member"
-            | "function.def"
-            | "channel.def"
-    )
+fn defines_symbol<'c: 'a, 'a>(
+    operation: &impl OperationLike<'c, 'a>,
+    operation_name: &str,
+) -> bool {
+    is_struct_def(operation)
+        || is_struct_member(operation)
+        || is_func_def(operation)
+        || matches!(
+            operation_name,
+            "poly.template" | "poly.param" | "poly.expr" | "channel.def"
+        )
 }
