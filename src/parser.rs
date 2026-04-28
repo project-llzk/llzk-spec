@@ -253,7 +253,7 @@ impl<'a> Lowerer<'a> {
                 value: pair.as_str().to_string(),
                 span: self.span(pair.as_span()),
             }),
-            Rule::symbol => Ok(Expression::Symbol(self.identifier(pair)?)),
+            Rule::symbol | Rule::escaped_symbol => Ok(Expression::Symbol(self.identifier(pair)?)),
             _ => self.unexpected(pair, "expression"),
         }
     }
@@ -427,6 +427,23 @@ impl<'a> Lowerer<'a> {
                 name: pair.as_str().to_string(),
                 span: self.span(pair.as_span()),
             }),
+            Rule::escaped_symbol => {
+                let span = self.span(pair.as_span());
+                let text = pair.as_str();
+                let name = &text[1..text.len() - 1];
+                if name.is_empty() {
+                    Err(Diagnostic::new(
+                        self.source_name,
+                        "escaped symbol cannot be empty",
+                        Some(span),
+                    ))
+                } else {
+                    Ok(Identifier {
+                        name: name.to_string(),
+                        span,
+                    })
+                }
+            }
             _ => self.unexpected(pair, "identifier"),
         }
     }
@@ -605,5 +622,41 @@ predicate ok(x) { return x == 0; }
             panic!("expected indexed arg expression");
         };
         assert!(matches!(target.as_ref(), Expression::Arg { index: 0, .. }));
+    }
+
+    #[test]
+    fn parses_escaped_reserved_symbols() {
+        let source = "contract for `contract` { ensure `return` == `return`; }";
+        let document = parse_document("test.spec", source).expect("parse success");
+        let Item::Contract(contract) = &document.items[0] else {
+            panic!("expected contract");
+        };
+        assert_eq!(contract.target.name, "contract");
+
+        let Statement::Ensure { expression, .. } = &contract.body.statements[0] else {
+            panic!("expected ensure statement");
+        };
+        let Expression::Binary { left, right, .. } = expression else {
+            panic!("expected equality expression");
+        };
+        assert!(matches!(
+            left.as_ref(),
+            Expression::Symbol(identifier) if identifier.name == "return"
+        ));
+        assert!(matches!(
+            right.as_ref(),
+            Expression::Symbol(identifier) if identifier.name == "return"
+        ));
+    }
+
+    #[test]
+    fn rejects_empty_escaped_symbols() {
+        let diagnostic = parse_document("test.spec", "contract for Foo { ensure `` == 0; }")
+            .expect_err("parse failure");
+        assert!(
+            diagnostic
+                .message
+                .contains("escaped symbol cannot be empty")
+        );
     }
 }

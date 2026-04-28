@@ -17,11 +17,11 @@ item = _{
 }
 
 contract_decl = {
-    "contract" ~ "for" ~ symbol ~ block
+    "contract" ~ "for" ~ identifier ~ block
 }
 
 predicate_decl = {
-    "predicate" ~ symbol ~ param_list ~ (
+    "predicate" ~ identifier ~ param_list ~ (
         block_predicate_body
       | "=" ~ expression ~ semi?
     )
@@ -32,7 +32,7 @@ block_predicate_body = {
 }
 
 param_list = {
-    "(" ~ (symbol ~ ("," ~ symbol)*)? ~ ")"
+    "(" ~ (identifier ~ ("," ~ identifier)*)? ~ ")"
 }
 
 block = {
@@ -79,11 +79,11 @@ ensure_stmt = {
 }
 
 let_stmt = {
-    "let" ~ symbol ~ "=" ~ (nondet_expr | expression) ~ semi
+    "let" ~ identifier ~ "=" ~ (nondet_expr | expression) ~ semi
 }
 
 unused_stmt = {
-    "unused" ~ symbol ~ semi
+    "unused" ~ identifier ~ semi
 }
 
 return_stmt = {
@@ -92,7 +92,7 @@ return_stmt = {
 
 // invariant for <loop_label> (<induction_var>) { /* region */ }
 invariant_decl = {
-    "invariant" ~ "for" ~ symbol ~ "(" ~ symbol ~ ")" ~ block
+    "invariant" ~ "for" ~ identifier ~ "(" ~ identifier ~ ")" ~ block
 }
 
 semi = { ";" }
@@ -160,7 +160,7 @@ primary_expr = _{
   | boolean
   | number
   | arg_ref
-  | symbol
+  | identifier
   | "(" ~ expression ~ ")"
 }
 
@@ -168,7 +168,7 @@ primary_expr = _{
 // forall i in arr, expr
 // exists i in 0..n, expr
 quantifier_expr = {
-    quantifier_kw ~ symbol ~ "in" ~ quantifier_domain ~ "," ~ expression
+    quantifier_kw ~ identifier ~ "in" ~ quantifier_domain ~ "," ~ expression
 }
 
 quantifier_kw = {
@@ -201,6 +201,19 @@ arg_ref = {
 boolean = {
     "true"
   | "false"
+}
+
+identifier = _{
+    escaped_symbol
+  | symbol
+}
+
+escaped_symbol = @{
+    "`" ~ escaped_symbol_char* ~ "`"
+}
+
+escaped_symbol_char = {
+    !"`" ~ ANY
 }
 
 symbol = @{
