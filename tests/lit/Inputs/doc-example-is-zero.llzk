@@ -1,0 +1,54 @@
+// Derived from the Circom example:
+//
+// template IsZero() {
+//   signal input in;
+//   signal output out;
+//   signal inv;
+//   inv <-- in!=0 ? 1/in : 0;
+//   out <== -in*inv +1;
+//   in*out === 0;
+// }
+//
+// component main {public [in]}= IsZero();
+
+module attributes {llzk.lang, llzk.main = !struct.type<@IsZero::@IsZero<[]>>} {
+  poly.template @IsZero {
+    struct.def @IsZero {
+      struct.member @out : !felt.type<"bn128"> {llzk.pub}
+      struct.member @inv : !felt.type<"bn128">
+      function.def @compute(%arg0: !felt.type<"bn128"> {llzk.pub}) -> !struct.type<@IsZero::@IsZero<[]>> attributes {function.allow_non_native_field_ops, function.allow_witness} {
+        %self = struct.new : <@IsZero::@IsZero<[]>>
+        %felt_const_0 = felt.const  0 : <"bn128">
+        %0 = bool.cmp ne(%arg0, %felt_const_0) : !felt.type<"bn128">, !felt.type<"bn128">
+        %1 = scf.if %0 -> (!felt.type<"bn128">) {
+          %felt_const_1_0 = felt.const  1 : <"bn128">
+          %5 = felt.div %felt_const_1_0, %arg0 : !felt.type<"bn128">, !felt.type<"bn128">
+          scf.yield %5 : !felt.type<"bn128">
+        } else {
+          %felt_const_0_0 = felt.const  0 : <"bn128">
+          scf.yield %felt_const_0_0 : !felt.type<"bn128">
+        }
+        struct.writem %self[@inv] = %1 : <@IsZero::@IsZero<[]>>, !felt.type<"bn128">
+        %2 = felt.neg %arg0 : !felt.type<"bn128">
+        %3 = felt.mul %2, %1 : !felt.type<"bn128">, !felt.type<"bn128">
+        %felt_const_1 = felt.const  1 : <"bn128">
+        %4 = felt.add %3, %felt_const_1 : !felt.type<"bn128">, !felt.type<"bn128">
+        struct.writem %self[@out] = %4 : <@IsZero::@IsZero<[]>>, !felt.type<"bn128">
+        function.return %self : !struct.type<@IsZero::@IsZero<[]>>
+      }
+      function.def @constrain(%arg0: !struct.type<@IsZero::@IsZero<[]>>, %arg1: !felt.type<"bn128"> {llzk.pub}) attributes {function.allow_constraint, function.allow_non_native_field_ops} {
+        %0 = struct.readm %arg0[@out] : <@IsZero::@IsZero<[]>>, !felt.type<"bn128">
+        %1 = struct.readm %arg0[@inv] : <@IsZero::@IsZero<[]>>, !felt.type<"bn128">
+        %2 = felt.neg %arg1 : !felt.type<"bn128">
+        %3 = felt.mul %2, %1 : !felt.type<"bn128">, !felt.type<"bn128">
+        %felt_const_1 = felt.const  1 : <"bn128">
+        %4 = felt.add %3, %felt_const_1 : !felt.type<"bn128">, !felt.type<"bn128">
+        constrain.eq %0, %4 : !felt.type<"bn128">, !felt.type<"bn128">
+        %5 = felt.mul %arg1, %0 : !felt.type<"bn128">, !felt.type<"bn128">
+        %felt_const_0 = felt.const  0 : <"bn128">
+        constrain.eq %5, %felt_const_0 : !felt.type<"bn128">, !felt.type<"bn128">
+        function.return
+      }
+    }
+  }
+}

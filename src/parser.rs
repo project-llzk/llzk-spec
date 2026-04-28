@@ -241,6 +241,7 @@ impl<'a> Lowerer<'a> {
                     span,
                 })
             }
+            Rule::arg_ref => self.arg_ref(pair),
             Rule::nondet_expr => Ok(Expression::Nondet {
                 span: self.span(pair.as_span()),
             }),
@@ -255,6 +256,20 @@ impl<'a> Lowerer<'a> {
             Rule::symbol => Ok(Expression::Symbol(self.identifier(pair)?)),
             _ => self.unexpected(pair, "expression"),
         }
+    }
+
+    /// Lowers `arg[N]`, a temporary reference to an unnamed function argument.
+    fn arg_ref(&self, pair: Pair<'a, Rule>) -> Result<Expression, Diagnostic> {
+        let span = self.span(pair.as_span());
+        let index_pair = pair.into_inner().next().expect("arg index");
+        let index = index_pair.as_str().parse::<usize>().map_err(|_| {
+            Diagnostic::new(
+                self.source_name,
+                format!("argument index `{}` is too large", index_pair.as_str()),
+                Some(self.span(index_pair.as_span())),
+            )
+        })?;
+        Ok(Expression::Arg { index, span })
     }
 
     /// Lowers a conditional expression, using `pest` for the condition subtree.
@@ -566,5 +581,29 @@ predicate ok(x) { return x == 0; }
             panic!("expected scoped statement");
         };
         assert_eq!(*scope, Scope::Compute);
+    }
+
+    #[test]
+    fn parses_argument_references() {
+        let source = "contract for Foo { ensure len(arg[0]) == arg[0][i]; }";
+        let document = parse_document("test.spec", source).expect("parse success");
+        let Item::Contract(contract) = &document.items[0] else {
+            panic!("expected contract");
+        };
+        let Statement::Ensure { expression, .. } = &contract.body.statements[0] else {
+            panic!("expected ensure statement");
+        };
+        let Expression::Binary { left, right, .. } = expression else {
+            panic!("expected equality expression");
+        };
+        let Expression::Len { target, .. } = left.as_ref() else {
+            panic!("expected len expression");
+        };
+        assert!(matches!(target.as_ref(), Expression::Arg { index: 0, .. }));
+
+        let Expression::Index { target, .. } = right.as_ref() else {
+            panic!("expected indexed arg expression");
+        };
+        assert!(matches!(target.as_ref(), Expression::Arg { index: 0, .. }));
     }
 }

@@ -159,6 +159,7 @@ primary_expr = _{
   | len_expr
   | boolean
   | number
+  | arg_ref
   | symbol
   | "(" ~ expression ~ ")"
 }
@@ -193,6 +194,10 @@ nondet_expr = {
     "nondet"
 }
 
+arg_ref = {
+    "arg" ~ "[" ~ number ~ "]"
+}
+
 boolean = {
     "true"
   | "false"
@@ -223,6 +228,7 @@ reserved_keyword = {
   | "exists"
   | "unused"
   | "invariant"
+  | "arg"
   | "true"
   | "false"
 }

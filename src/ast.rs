@@ -163,6 +163,10 @@ pub enum Expression {
         target: Box<Expression>,
         span: Span,
     },
+    Arg {
+        index: usize,
+        span: Span,
+    },
     Nondet {
         span: Span,
     },
@@ -188,6 +192,7 @@ impl Expression {
             | Self::Call { span, .. }
             | Self::Quantifier { span, .. }
             | Self::Len { span, .. }
+            | Self::Arg { span, .. }
             | Self::Nondet { span }
             | Self::Boolean { span, .. }
             | Self::Number { span, .. } => *span,
