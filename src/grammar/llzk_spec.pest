@@ -48,6 +48,7 @@ statement = _{
   | return_stmt
   | invariant_decl
   | predicate_decl
+  | block
   | semi
 }
 
@@ -94,7 +95,7 @@ invariant_decl = {
     "invariant" ~ "for" ~ symbol ~ "(" ~ symbol ~ ")" ~ block
 }
 
-semi = _{ ";" }
+semi = { ";" }
 
 expression = _{ conditional_expr }
 

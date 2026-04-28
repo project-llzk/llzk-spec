@@ -169,9 +169,11 @@ impl<'a> Lowerer<'a> {
             }
             Rule::invariant_decl => Ok(Statement::Invariant(self.invariant_decl(pair)?)),
             Rule::predicate_decl => Ok(Statement::Predicate(self.predicate_decl(pair)?)),
-            Rule::semi => Ok(Statement::Empty {
-                span: self.span(pair.as_span()),
-            }),
+            Rule::semi => Err(Diagnostic::new(
+                self.source_name,
+                "empty statements are not allowed",
+                Some(self.span(pair.as_span())),
+            )),
             Rule::block => Ok(Statement::Block(self.block(pair)?)),
             _ => self.unexpected(pair, "statement"),
         }
