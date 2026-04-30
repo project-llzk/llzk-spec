@@ -14,6 +14,9 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-repo
+        with:
+          github_token: "${{ secrets.GITHUB_TOKEN }}"
+          cachix_token: "${{ secrets.CACHIX_PUBLIC_TOKEN }}"
       - name: Build and test
         run: nix --print-build-logs build
 
@@ -24,6 +27,9 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-repo
+        with:
+          github_token: "${{ secrets.GITHUB_TOKEN }}"
+          cachix_token: "${{ secrets.CACHIX_PUBLIC_TOKEN }}"
       - name: Set nix environment
         uses: nicknovitski/nix-develop@v1
         env:
