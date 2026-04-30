@@ -293,7 +293,8 @@ impl<'a> Lowerer<'a> {
         }
     }
 
-    /// Lowers `arg[N]`, a temporary reference to an unnamed function argument.
+    /// Lowers `arg[N]`, a reference to an unnamed function argument (i.e., does
+    /// not have the `function.arg_name` attribute).
     fn arg_ref(&self, pair: Pair<'a, Rule>) -> Result<Expression, Diagnostic> {
         let span = self.span(pair.as_span());
         let index_pair = pair.into_inner().next().expect("arg index");
