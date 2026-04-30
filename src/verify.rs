@@ -3,7 +3,7 @@
 
 use crate::ast::*;
 use crate::diagnostic::Diagnostic;
-use crate::ir::IrMetadata;
+use crate::ir::{IrMetadata, LoopMetadata, LoopScope};
 use std::collections::HashSet;
 
 /// One lexical scope frame for names introduced while verifying a block.
@@ -11,6 +11,15 @@ use std::collections::HashSet;
 struct ScopeFrame {
     values: HashSet<String>,
     predicates: HashSet<String>,
+}
+
+/// Semantic context flags for statement and expression verification.
+#[derive(Debug, Clone, Default)]
+struct VerifyContext {
+    in_predicate: bool,
+    in_invariant: bool,
+    in_step: bool,
+    loop_scope: Option<LoopScope>,
 }
 
 /// Verifies the parsed document against the LLZK IR metadata.
@@ -84,7 +93,11 @@ impl<'a> Verifier<'a> {
         }
 
         let mut scopes = vec![ScopeFrame::default()];
-        self.verify_block(&contract.body, &mut scopes, false);
+        let context = VerifyContext {
+            loop_scope: self.contract_loop_scope(&contract.target.name),
+            ..VerifyContext::default()
+        };
+        self.verify_block(&contract.body, &mut scopes, &context);
     }
 
     /// Verifies a predicate declaration with inherited outer lexical scopes.
@@ -96,16 +109,30 @@ impl<'a> Verifier<'a> {
         }
 
         match &predicate.body {
-            PredicateBody::Block(block) => self.verify_block(block, &mut scopes, true),
-            PredicateBody::Expr(expression) => self.verify_expression(expression, &mut scopes),
+            PredicateBody::Block(block) => {
+                let context = VerifyContext {
+                    in_predicate: true,
+                    ..VerifyContext::default()
+                };
+                self.verify_block(block, &mut scopes, &context)
+            }
+            PredicateBody::Expr(expression) => {
+                let context = VerifyContext::default();
+                self.verify_expression(expression, &mut scopes, &context)
+            }
         }
     }
 
     /// Verifies a block inside a fresh lexical scope frame.
-    fn verify_block(&mut self, block: &Block, scopes: &mut Vec<ScopeFrame>, in_predicate: bool) {
+    fn verify_block(
+        &mut self,
+        block: &Block,
+        scopes: &mut Vec<ScopeFrame>,
+        context: &VerifyContext,
+    ) {
         scopes.push(ScopeFrame::default());
         for statement in &block.statements {
-            self.verify_statement(statement, scopes, in_predicate);
+            self.verify_statement(statement, scopes, context);
         }
         scopes.pop();
     }
@@ -115,18 +142,18 @@ impl<'a> Verifier<'a> {
         &mut self,
         statement: &Statement,
         scopes: &mut Vec<ScopeFrame>,
-        in_predicate: bool,
+        context: &VerifyContext,
     ) {
         match statement {
             Statement::Scoped { statement, .. } => {
-                self.verify_statement(statement, scopes, in_predicate)
+                self.verify_statement(statement, scopes, context)
             }
-            Statement::Block(block) => self.verify_block(block, scopes, in_predicate),
+            Statement::Block(block) => self.verify_block(block, scopes, context),
             Statement::Require { expression, .. } | Statement::Ensure { expression, .. } => {
-                self.verify_expression(expression, scopes)
+                self.verify_expression(expression, scopes, context)
             }
             Statement::Let { name, value, .. } => {
-                self.verify_expression(value, scopes);
+                self.verify_expression(value, scopes, context);
                 self.define_value(scopes, name, "duplicate local binding");
             }
             Statement::Unused { name, .. } => {
@@ -138,22 +165,87 @@ impl<'a> Verifier<'a> {
                 }
             }
             Statement::Return { expression, span } => {
-                if !in_predicate {
+                if !context.in_predicate {
                     self.push("return is only valid inside predicates", Some(*span));
                 }
-                self.verify_expression(expression, scopes);
+                self.verify_expression(expression, scopes, context);
+            }
+            Statement::Increases { expression, span } => {
+                if !context.in_invariant {
+                    self.push("increases is only valid inside invariants", Some(*span));
+                }
+                self.verify_expression(
+                    expression,
+                    scopes,
+                    &VerifyContext {
+                        in_step: false,
+                        ..context.clone()
+                    },
+                );
+            }
+            Statement::Decreases { expression, span } => {
+                if !context.in_invariant {
+                    self.push("decreases is only valid inside invariants", Some(*span));
+                }
+                self.verify_expression(
+                    expression,
+                    scopes,
+                    &VerifyContext {
+                        in_step: false,
+                        ..context.clone()
+                    },
+                );
+            }
+            Statement::Step { expression, span } => {
+                if !context.in_invariant {
+                    self.push("step is only valid inside invariants", Some(*span));
+                }
+                self.verify_expression(
+                    expression,
+                    scopes,
+                    &VerifyContext {
+                        in_step: true,
+                        ..context.clone()
+                    },
+                );
             }
             Statement::Invariant(invariant) => {
-                if !self.ir.loop_labels.contains(&invariant.loop_label.name) {
-                    self.push(
-                        format!("unknown loop label `{}`", invariant.loop_label.name),
-                        Some(invariant.loop_label.span),
-                    );
+                match self.lookup_loop(&invariant.loop_name.name, context.loop_scope.as_ref()) {
+                    Some(loop_metadata)
+                        if loop_metadata.binding_count != invariant.bindings.len() =>
+                    {
+                        self.push(
+                            format!(
+                                "loop `{}` expects {} invariant bindings, found {}",
+                                invariant.loop_name.name,
+                                loop_metadata.binding_count,
+                                invariant.bindings.len()
+                            ),
+                            Some(invariant.loop_name.span),
+                        );
+                    }
+                    Some(_) => {}
+                    None => {
+                        self.push(
+                            format!("unknown loop `{}`", invariant.loop_name.name),
+                            Some(invariant.loop_name.span),
+                        );
+                    }
                 }
                 scopes.push(ScopeFrame::default());
-                self.define_value(scopes, &invariant.induction_var, "duplicate local binding");
+                for binding in &invariant.bindings {
+                    self.define_value(scopes, binding, "duplicate local binding");
+                }
                 for statement in &invariant.body.statements {
-                    self.verify_statement(statement, scopes, in_predicate);
+                    self.verify_statement(
+                        statement,
+                        scopes,
+                        &VerifyContext {
+                            in_invariant: true,
+                            in_step: false,
+                            ..context.clone()
+                        },
+                    );
                 }
                 scopes.pop();
             }
@@ -176,7 +268,12 @@ impl<'a> Verifier<'a> {
     }
 
     /// Verifies an expression recursively and reports unresolved names.
-    fn verify_expression(&mut self, expression: &Expression, scopes: &mut Vec<ScopeFrame>) {
+    fn verify_expression(
+        &mut self,
+        expression: &Expression,
+        scopes: &mut Vec<ScopeFrame>,
+        context: &VerifyContext,
+    ) {
         match expression {
             Expression::Conditional {
                 condition,
@@ -184,18 +281,18 @@ impl<'a> Verifier<'a> {
                 else_branch,
                 ..
             } => {
-                self.verify_expression(condition, scopes);
-                self.verify_expression(then_branch, scopes);
-                self.verify_expression(else_branch, scopes);
+                self.verify_expression(condition, scopes, context);
+                self.verify_expression(then_branch, scopes, context);
+                self.verify_expression(else_branch, scopes, context);
             }
             Expression::Binary { left, right, .. } => {
-                self.verify_expression(left, scopes);
-                self.verify_expression(right, scopes);
+                self.verify_expression(left, scopes, context);
+                self.verify_expression(right, scopes, context);
             }
-            Expression::Unary { expr, .. } => self.verify_expression(expr, scopes),
+            Expression::Unary { expr, .. } => self.verify_expression(expr, scopes, context),
             Expression::Index { target, index, .. } => {
-                self.verify_expression(target, scopes);
-                self.verify_expression(index, scopes);
+                self.verify_expression(target, scopes, context);
+                self.verify_expression(index, scopes, context);
             }
             Expression::Call { callee, args, .. } => {
                 if !self.name_visible(scopes, &callee.name) {
@@ -205,7 +302,7 @@ impl<'a> Verifier<'a> {
                     );
                 }
                 for arg in args {
-                    self.verify_expression(arg, scopes);
+                    self.verify_expression(arg, scopes, context);
                 }
             }
             Expression::Quantifier {
@@ -216,17 +313,23 @@ impl<'a> Verifier<'a> {
             } => {
                 match domain {
                     QuantifierDomain::Range { start, end, .. } => {
-                        self.verify_expression(start, scopes);
-                        self.verify_expression(end, scopes);
+                        self.verify_expression(start, scopes, context);
+                        self.verify_expression(end, scopes, context);
                     }
-                    QuantifierDomain::Expr(expr) => self.verify_expression(expr, scopes),
+                    QuantifierDomain::Expr(expr) => self.verify_expression(expr, scopes, context),
                 }
                 scopes.push(ScopeFrame::default());
                 self.define_value(scopes, binding, "duplicate local binding");
-                self.verify_expression(body, scopes);
+                self.verify_expression(body, scopes, context);
                 scopes.pop();
             }
-            Expression::Len { target, .. } => self.verify_expression(target, scopes),
+            Expression::Len { target, .. } => self.verify_expression(target, scopes, context),
+            Expression::Old { expression, span } => {
+                if !context.in_step {
+                    self.push("old is only valid inside step expressions", Some(*span));
+                }
+                self.verify_expression(expression, scopes, context);
+            }
             // TODO: `arg[N]` is a temporary workaround for unnamed function arguments.
             // Once a solution for referencing arguments using source-language naming
             // is implemented in llzk-lib, we will default to resolving arguments in
@@ -265,6 +368,43 @@ impl<'a> Verifier<'a> {
             || self.ir.visible_names.contains(name)
     }
 
+    /// Resolves loop names by owner scope.
+    fn lookup_loop(&self, name: &str, scope: Option<&LoopScope>) -> Option<LoopMetadata> {
+        match scope {
+            Some(scope) => self
+                .ir
+                .labeled_loops
+                .get(&(scope.clone(), name.to_string()))
+                .cloned(),
+            None => None,
+        }
+    }
+
+    /// Maps a contract target to the generated loop scope used by unlabeled loops.
+    fn contract_loop_scope(&self, target: &str) -> Option<LoopScope> {
+        let struct_scope = LoopScope::Struct(target.to_string());
+        if self
+            .ir
+            .labeled_loops
+            .keys()
+            .any(|(scope, _)| scope == &struct_scope)
+        {
+            return Some(struct_scope);
+        }
+
+        let function_scope = LoopScope::Function(target.to_string());
+        if self
+            .ir
+            .labeled_loops
+            .keys()
+            .any(|(scope, _)| scope == &function_scope)
+        {
+            return Some(function_scope);
+        }
+
+        None
+    }
+
     /// Records a diagnostic for the current source file.
     fn push(&mut self, message: impl Into<String>, span: Option<Span>) {
         self.diagnostics
@@ -275,8 +415,9 @@ impl<'a> Verifier<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ir::IrMetadata;
+    use crate::ir::{IrMetadata, LoopKind, LoopMetadata, LoopScope};
     use crate::parser::parse_document;
+    use std::collections::HashMap;
 
     fn ir() -> IrMetadata {
         IrMetadata {
@@ -285,7 +426,17 @@ mod tests {
                 .into_iter()
                 .map(str::to_string)
                 .collect(),
-            loop_labels: ["loop1".to_string()].into_iter().collect(),
+            labeled_loops: [(
+                (LoopScope::Struct("Foo".to_string()), "loop0".to_string()),
+                LoopMetadata {
+                    kind: LoopKind::For,
+                    binding_count: 4,
+                    scope: LoopScope::Struct("Foo".to_string()),
+                    explicit_label: false,
+                },
+            )]
+            .into_iter()
+            .collect::<HashMap<_, _>>(),
         }
     }
 
@@ -329,5 +480,50 @@ contract for Foo {
             verify_document(&document, &ir(), "test.spec").expect_err("verify failure");
         assert_eq!(diagnostics.len(), 1);
         assert!(diagnostics[0].message.contains("duplicate local binding"));
+    }
+
+    #[test]
+    fn verifies_loop_binding_count() {
+        let source =
+            "contract for Foo { invariant for loop0(lb, i, ub, step) { ensure i >= lb; } }";
+        let document = parse_document("test.spec", source).expect("parse success");
+        verify_document(&document, &ir(), "test.spec").expect("verify success");
+
+        let source = "contract for Foo { invariant for loop0(i) { ensure i >= 0; } }";
+        let document = parse_document("test.spec", source).expect("parse success");
+        let diagnostics =
+            verify_document(&document, &ir(), "test.spec").expect_err("verify failure");
+        assert!(
+            diagnostics
+                .iter()
+                .any(|diag| diag.message.contains("expects 4 invariant bindings"))
+        );
+    }
+
+    #[test]
+    fn restricts_step_and_old_to_invariant_steps() {
+        let source = r#"
+contract for Foo {
+  invariant for loop0(lb, i, ub, step) {
+    step i == old(i) + step;
+  }
+}
+"#;
+        let document = parse_document("test.spec", source).expect("parse success");
+        verify_document(&document, &ir(), "test.spec").expect("verify success");
+
+        let source = "contract for Foo { ensure old(out) == out; step out == out; }";
+        let document = parse_document("test.spec", source).expect("parse success");
+        let diagnostics =
+            verify_document(&document, &ir(), "test.spec").expect_err("verify failure");
+        assert!(
+            diagnostics
+                .iter()
+                .any(|diag| diag.message.contains("old is only valid inside step"))
+        );
+        assert!(diagnostics.iter().any(|diag| {
+            diag.message
+                .contains("step is only valid inside invariants")
+        }));
     }
 }

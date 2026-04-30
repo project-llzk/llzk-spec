@@ -46,6 +46,9 @@ statement = _{
   | let_stmt
   | unused_stmt
   | return_stmt
+  | increases_stmt
+  | decreases_stmt
+  | step_stmt
   | invariant_decl
   | predicate_decl
   | block
@@ -60,6 +63,9 @@ scoped_stmt = {
       | let_stmt
       | unused_stmt
       | return_stmt
+      | increases_stmt
+      | decreases_stmt
+      | step_stmt
       | invariant_decl
     )
 }
@@ -90,9 +96,25 @@ return_stmt = {
     "return" ~ expression ~ semi
 }
 
-// invariant for <loop_label> (<induction_var>) { /* region */ }
+increases_stmt = {
+    "increases" ~ expression ~ semi
+}
+
+decreases_stmt = {
+    "decreases" ~ expression ~ semi
+}
+
+step_stmt = {
+    "step" ~ expression ~ semi
+}
+
+// invariant for <loop_name> (<bindings>) { /* region */ }
 invariant_decl = {
-    "invariant" ~ "for" ~ identifier ~ "(" ~ identifier ~ ")" ~ block
+    "invariant" ~ "for" ~ identifier ~ "(" ~ binding_list ~ ")" ~ block
+}
+
+binding_list = {
+    identifier ~ ("," ~ identifier)*
 }
 
 semi = { ";" }
@@ -157,6 +179,7 @@ primary_expr = _{
     quantifier_expr
   | nondet_expr
   | len_expr
+  | old_expr
   | boolean
   | number
   | arg_ref
@@ -190,6 +213,10 @@ len_expr = {
     "len" ~ "(" ~ expression ~ ")"
 }
 
+old_expr = {
+    "old" ~ "(" ~ expression ~ ")"
+}
+
 nondet_expr = {
     "nondet"
 }
@@ -217,7 +244,7 @@ escaped_symbol_char = {
 }
 
 symbol = @{
-    !reserved_keyword ~ ident
+    !keyword ~ ident
 }
 
 ident = @{
@@ -226,6 +253,10 @@ ident = @{
 
 // "in" is intentionally not reserved globally.
 // It is treated contextually in quantifier_expr.
+keyword = {
+    reserved_keyword ~ !(ASCII_ALPHANUMERIC | "_")
+}
+
 reserved_keyword = {
     "contract"
   | "for"

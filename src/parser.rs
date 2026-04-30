@@ -167,6 +167,23 @@ impl<'a> Lowerer<'a> {
                 let expression = self.expression(pair.into_inner().next().expect("return expr"))?;
                 Ok(Statement::Return { expression, span })
             }
+            Rule::increases_stmt => {
+                let span = self.span(pair.as_span());
+                let expression =
+                    self.expression(pair.into_inner().next().expect("increases expr"))?;
+                Ok(Statement::Increases { expression, span })
+            }
+            Rule::decreases_stmt => {
+                let span = self.span(pair.as_span());
+                let expression =
+                    self.expression(pair.into_inner().next().expect("decreases expr"))?;
+                Ok(Statement::Decreases { expression, span })
+            }
+            Rule::step_stmt => {
+                let span = self.span(pair.as_span());
+                let expression = self.expression(pair.into_inner().next().expect("step expr"))?;
+                Ok(Statement::Step { expression, span })
+            }
             Rule::invariant_decl => Ok(Statement::Invariant(self.invariant_decl(pair)?)),
             Rule::predicate_decl => Ok(Statement::Predicate(self.predicate_decl(pair)?)),
             Rule::semi => Err(Diagnostic::new(
@@ -206,15 +223,22 @@ impl<'a> Lowerer<'a> {
     fn invariant_decl(&self, pair: Pair<'a, Rule>) -> Result<InvariantDecl, Diagnostic> {
         let span = self.span(pair.as_span());
         let mut inner = pair.into_inner();
-        let loop_label = self.identifier(inner.next().expect("loop label"))?;
-        let induction_var = self.identifier(inner.next().expect("induction variable"))?;
+        let loop_name = self.identifier(inner.next().expect("loop name"))?;
+        let bindings = self.binding_list(inner.next().expect("invariant bindings"))?;
         let body = self.block(inner.next().expect("invariant body"))?;
         Ok(InvariantDecl {
-            loop_label,
-            induction_var,
+            loop_name,
+            bindings,
             body,
             span,
         })
+    }
+
+    /// Lowers a comma-separated invariant binding list.
+    fn binding_list(&self, pair: Pair<'a, Rule>) -> Result<Vec<Identifier>, Diagnostic> {
+        pair.into_inner()
+            .map(|pair| self.identifier(pair))
+            .collect()
     }
 
     /// Lowers an expression by dispatching to the generated `pest` parse tree.
@@ -238,6 +262,14 @@ impl<'a> Lowerer<'a> {
                 let target = self.expression(pair.into_inner().next().expect("len target"))?;
                 Ok(Expression::Len {
                     target: Box::new(target),
+                    span,
+                })
+            }
+            Rule::old_expr => {
+                let span = self.span(pair.as_span());
+                let expression = self.expression(pair.into_inner().next().expect("old expr"))?;
+                Ok(Expression::Old {
+                    expression: Box::new(expression),
                     span,
                 })
             }
@@ -625,6 +657,58 @@ predicate ok(x) { return x == 0; }
     }
 
     #[test]
+    fn parses_multi_binding_invariant_steps_and_variant_statements() {
+        let source = r#"
+contract for Foo {
+  invariant for loop0(lb, i, ub, step) {
+    decreases ub - i;
+    increases i;
+    step i == old(i) + step;
+  }
+}
+"#;
+        let document = parse_document("test.spec", source).expect("parse success");
+        let Item::Contract(contract) = &document.items[0] else {
+            panic!("expected contract");
+        };
+        let Statement::Invariant(invariant) = &contract.body.statements[0] else {
+            panic!("expected invariant");
+        };
+        assert_eq!(invariant.loop_name.name, "loop0");
+        assert_eq!(invariant.bindings.len(), 4);
+        assert!(matches!(
+            invariant.body.statements[0],
+            Statement::Decreases { .. }
+        ));
+        assert!(matches!(
+            invariant.body.statements[1],
+            Statement::Increases { .. }
+        ));
+        let Statement::Step { expression, .. } = &invariant.body.statements[2] else {
+            panic!("expected step");
+        };
+        let Expression::Binary { left, right, .. } = expression else {
+            panic!("expected step equality");
+        };
+        assert!(matches!(
+            left.as_ref(),
+            Expression::Symbol(identifier) if identifier.name == "i"
+        ));
+        let Expression::Binary { left, .. } = right.as_ref() else {
+            panic!("expected step transition");
+        };
+        assert!(matches!(left.as_ref(), Expression::Old { .. }));
+    }
+
+    #[test]
+    fn rejects_empty_invariant_binding_lists() {
+        let diagnostic =
+            parse_document("test.spec", "contract for Foo { invariant for loop0() {} }")
+                .expect_err("parse failure");
+        assert!(diagnostic.message.contains("syntax error"));
+    }
+
+    #[test]
     fn parses_escaped_reserved_symbols() {
         let source = "contract for `contract` { ensure `return` == `return`; }";
         let document = parse_document("test.spec", source).expect("parse success");
@@ -647,6 +731,19 @@ predicate ok(x) { return x == 0; }
             right.as_ref(),
             Expression::Symbol(identifier) if identifier.name == "return"
         ));
+    }
+
+    #[test]
+    fn allows_identifiers_with_keyword_prefixes() {
+        let source = "contract for Foo { invariant for for_label(lb, i, ub, stride) {} }";
+        let document = parse_document("test.spec", source).expect("parse success");
+        let Item::Contract(contract) = &document.items[0] else {
+            panic!("expected contract");
+        };
+        let Statement::Invariant(invariant) = &contract.body.statements[0] else {
+            panic!("expected invariant");
+        };
+        assert_eq!(invariant.loop_name.name, "for_label");
     }
 
     #[test]

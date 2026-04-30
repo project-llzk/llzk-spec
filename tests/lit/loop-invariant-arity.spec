@@ -3,9 +3,9 @@
 // END.
 
 contract for Foo {
-  invariant for loop2(lb, i, ub, step) {
+  invariant for loop0(i) {
     ensure out == i;
   }
 }
 
-// CHECK: unknown loop `loop2`
+// CHECK: loop `loop0` expects 4 invariant bindings, found 1

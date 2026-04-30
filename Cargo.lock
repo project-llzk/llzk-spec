@@ -474,6 +474,7 @@ dependencies = [
  "glob",
  "llzk",
  "melior",
+ "mlir-sys",
  "pest",
  "pest_derive",
  "serde",

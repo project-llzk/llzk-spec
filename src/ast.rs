@@ -95,6 +95,18 @@ pub enum Statement {
         expression: Expression,
         span: Span,
     },
+    Increases {
+        expression: Expression,
+        span: Span,
+    },
+    Decreases {
+        expression: Expression,
+        span: Span,
+    },
+    Step {
+        expression: Expression,
+        span: Span,
+    },
     Invariant(InvariantDecl),
     Predicate(PredicateDecl),
     Empty {
@@ -112,11 +124,11 @@ pub enum Scope {
     Constrain,
 }
 
-/// Loop invariant declaration attached to a loop label in LLZK IR.
+/// Loop invariant declaration attached to a loop in LLZK IR.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct InvariantDecl {
-    pub loop_label: Identifier,
-    pub induction_var: Identifier,
+    pub loop_name: Identifier,
+    pub bindings: Vec<Identifier>,
     pub body: Block,
     pub span: Span,
 }
@@ -163,6 +175,10 @@ pub enum Expression {
         target: Box<Expression>,
         span: Span,
     },
+    Old {
+        expression: Box<Expression>,
+        span: Span,
+    },
     Arg {
         index: usize,
         span: Span,
@@ -192,6 +208,7 @@ impl Expression {
             | Self::Call { span, .. }
             | Self::Quantifier { span, .. }
             | Self::Len { span, .. }
+            | Self::Old { span, .. }
             | Self::Arg { span, .. }
             | Self::Nondet { span }
             | Self::Boolean { span, .. }
