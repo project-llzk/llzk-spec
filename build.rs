@@ -4,6 +4,10 @@ use std::fs::File;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+/// Generates the file `discovered_tests.in` in the output directory, containing
+/// test functions for each `.spec` file found in the `tests/lit` directory.
+/// Each test function is named based on the file path, with slashes replaced
+/// by underscores, and is set up to call `lit_test` with the file's contents.
 fn main() {
     println!("cargo:rerun-if-changed=tests/lit");
 
