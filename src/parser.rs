@@ -734,6 +734,16 @@ contract for Foo {
     }
 
     #[test]
+    fn parses_fully_qualified_identifiers() {
+        let source = "contract for Bar::Foo { ensure out == 0; }";
+        let document = parse_document("test.spec", source).expect("parse success");
+        let Item::Contract(contract) = &document.items[0] else {
+            panic!("expected contract");
+        };
+        assert_eq!(contract.target.name, "Bar::Foo");
+    }
+
+    #[test]
     fn allows_identifiers_with_keyword_prefixes() {
         let source = "contract for Foo { invariant for for_label(lb, i, ub, stride) {} }";
         let document = parse_document("test.spec", source).expect("parse success");

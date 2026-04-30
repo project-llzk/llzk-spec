@@ -365,7 +365,7 @@ impl<'a> Verifier<'a> {
             .rev()
             .any(|scope| scope.values.contains(name) || scope.predicates.contains(name))
             || self.global_predicates.contains(name)
-            || self.ir.visible_names.contains(name)
+            || self.ir.defined_symbols.contains(name)
     }
 
     /// Resolves loop names by owner scope.
@@ -421,8 +421,7 @@ mod tests {
 
     fn ir() -> IrMetadata {
         IrMetadata {
-            defined_symbols: ["Foo".to_string()].into_iter().collect(),
-            visible_names: ["Foo", "out", "in", "helper"]
+            defined_symbols: ["Foo", "out", "in", "helper"]
                 .into_iter()
                 .map(str::to_string)
                 .collect(),

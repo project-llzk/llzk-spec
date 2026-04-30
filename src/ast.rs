@@ -116,7 +116,8 @@ pub enum Statement {
 
 /// Execution scope qualifier for a statement or block.
 ///
-/// The source keywords `compute` and `witness` both lower to `Compute`.
+/// The source keywords `compute` and `witness` both lower to `Compute` (one may
+/// be more natural than the other in a given source language context).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Scope {
