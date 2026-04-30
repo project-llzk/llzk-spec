@@ -160,6 +160,11 @@ pub enum Expression {
         index: Box<Expression>,
         span: Span,
     },
+    Member {
+        target: Box<Expression>,
+        member: Identifier,
+        span: Span,
+    },
     Call {
         callee: Identifier,
         args: Vec<Expression>,
@@ -206,6 +211,7 @@ impl Expression {
             | Self::Binary { span, .. }
             | Self::Unary { span, .. }
             | Self::Index { span, .. }
+            | Self::Member { span, .. }
             | Self::Call { span, .. }
             | Self::Quantifier { span, .. }
             | Self::Len { span, .. }

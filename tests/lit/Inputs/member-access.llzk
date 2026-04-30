@@ -1,0 +1,28 @@
+module attributes { llzk.lang } {
+  struct.def @Inner {
+    struct.member @pub_out : index {llzk.pub}
+    struct.member @secret : index
+    struct.member @arr_pub : !array.type<2 x index> {llzk.pub}
+    function.def @compute() -> !struct.type<@Inner<[]>> attributes {function.allow_non_native_field_ops, function.allow_witness} {
+      %self = struct.new : <@Inner<[]>>
+      function.return %self : !struct.type<@Inner<[]>>
+    }
+    function.def @constrain(%arg0: !struct.type<@Inner<[]>>) attributes {function.allow_constraint, function.allow_non_native_field_ops} {
+      function.return
+    }
+  }
+
+  struct.def @Parent {
+    struct.member @out : index
+    struct.member @child : !struct.type<@Inner<[]>>
+    struct.member @arr : !array.type<2 x index>
+    struct.member @pod : !pod.type<[@count: index, @flag: index]>
+    function.def @compute() -> !struct.type<@Parent<[]>> attributes {function.allow_non_native_field_ops, function.allow_witness} {
+      %self = struct.new : <@Parent<[]>>
+      function.return %self : !struct.type<@Parent<[]>>
+    }
+    function.def @constrain(%arg0: !struct.type<@Parent<[]>>) attributes {function.allow_constraint, function.allow_non_native_field_ops} {
+      function.return
+    }
+  }
+}

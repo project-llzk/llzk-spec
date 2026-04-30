@@ -164,11 +164,16 @@ postfix_expr = {
 
 postfix_op = _{
     index_op
+  | member_op
   | call_suffix
 }
 
 index_op = {
     "[" ~ expression ~ "]"
+}
+
+member_op = {
+    "." ~ identifier
 }
 
 call_suffix = {

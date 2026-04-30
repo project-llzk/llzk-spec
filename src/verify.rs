@@ -294,6 +294,18 @@ impl<'a> Verifier<'a> {
                 self.verify_expression(target, scopes, context);
                 self.verify_expression(index, scopes, context);
             }
+            Expression::Member { target, span, .. } => {
+                self.verify_expression(target, scopes, context);
+                if let Some(path) = self.expression_path(expression) {
+                    if self.ir.all_member_paths.contains(&path) {
+                        if !self.ir.accessible_member_paths.contains(&path) {
+                            self.push(format!("member `{path}` is not public"), Some(*span));
+                        }
+                    } else {
+                        self.push(format!("unknown identifier `{path}`"), Some(*span));
+                    }
+                }
+            }
             Expression::Call { callee, args, .. } => {
                 if !self.name_visible(scopes, &callee.name) {
                     self.push(
@@ -368,6 +380,16 @@ impl<'a> Verifier<'a> {
             || self.ir.defined_symbols.contains(name)
     }
 
+    fn expression_path(&self, expression: &Expression) -> Option<String> {
+        match expression {
+            Expression::Symbol(identifier) => Some(identifier.name.clone()),
+            Expression::Member { target, member, .. } => {
+                Some(format!("{}.{}", self.expression_path(target)?, member.name))
+            }
+            _ => None,
+        }
+    }
+
     /// Resolves loop names by owner scope.
     fn lookup_loop(&self, name: &str, scope: Option<&LoopScope>) -> Option<LoopMetadata> {
         match scope {
@@ -421,10 +443,25 @@ mod tests {
 
     fn ir() -> IrMetadata {
         IrMetadata {
-            defined_symbols: ["Foo", "out", "in", "helper"]
+            defined_symbols: ["Foo", "out", "in", "helper", "child", "pod"]
                 .into_iter()
                 .map(str::to_string)
                 .collect(),
+            all_member_paths: [
+                "child.pub_out".to_string(),
+                "child.secret".to_string(),
+                "pod.count".to_string(),
+                "pod.flag".to_string(),
+            ]
+            .into_iter()
+            .collect(),
+            accessible_member_paths: [
+                "child.pub_out".to_string(),
+                "pod.count".to_string(),
+                "pod.flag".to_string(),
+            ]
+            .into_iter()
+            .collect(),
             labeled_loops: [(
                 (LoopScope::Struct("Foo".to_string()), "loop0".to_string()),
                 LoopMetadata {
@@ -524,5 +561,22 @@ contract for Foo {
             diag.message
                 .contains("step is only valid inside invariants")
         }));
+    }
+
+    #[test]
+    fn validates_nested_member_access() {
+        let source = "contract for Foo { ensure child.pub_out == pod.count; }";
+        let document = parse_document("test.spec", source).expect("parse success");
+        verify_document(&document, &ir(), "test.spec").expect("verify success");
+
+        let source = "contract for Foo { ensure child.secret == 0; }";
+        let document = parse_document("test.spec", source).expect("parse success");
+        let diagnostics =
+            verify_document(&document, &ir(), "test.spec").expect_err("verify failure");
+        assert!(
+            diagnostics
+                .iter()
+                .any(|diag| { diag.message.contains("member `child.secret` is not public") })
+        );
     }
 }

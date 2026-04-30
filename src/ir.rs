@@ -7,16 +7,17 @@
 use crate::diagnostic::CompileError;
 use llzk::context::LlzkContext;
 use llzk::dialect::{
+    array::ArrayType,
     function::{FuncDefOpLike, is_func_def},
     poly::{is_expr_op, is_param_op},
-    r#struct::{is_struct_def, is_struct_member},
+    r#struct::{MemberDefOpLike, StructDefOpLike, StructType, is_struct_def, is_struct_member},
 };
 use llzk::operation::WalkOperationMutLike;
-use llzk::prelude::FuncDefOpRefMut;
+use llzk::prelude::{FuncDefOpRefMut, MemberDefOpRefMut, PodType, StructDefOpRef};
 use melior::{
     dialect::DialectRegistry,
     ir::{
-        Module, OperationRef,
+        Module, OperationRef, Type,
         attribute::StringAttribute,
         operation::{OperationLike, WalkOrder, WalkResult},
     },
@@ -59,6 +60,11 @@ pub struct LoopMetadata {
 pub struct IrMetadata {
     /// Symbol names explicitly defined in the IR.
     pub defined_symbols: HashSet<String>,
+    /// All nested member paths discovered from `struct.type` and `pod.type`
+    /// members, regardless of public visibility.
+    pub all_member_paths: HashSet<String>,
+    /// Member paths that specs are allowed to access.
+    pub accessible_member_paths: HashSet<String>,
     /// Explicit `loop_label` loops and generated `loopN` loops,
     /// scoped to their containing struct or free function.
     pub labeled_loops: HashMap<(LoopScope, String), LoopMetadata>,
@@ -84,6 +90,8 @@ fn extract_metadata(
 ) -> Result<IrMetadata, CompileError> {
     let mut metadata = IrMetadata {
         defined_symbols: HashSet::new(),
+        all_member_paths: HashSet::new(),
+        accessible_member_paths: HashSet::new(),
         labeled_loops: HashMap::new(),
     };
     let mut duplicate_loop_name = None;
@@ -101,6 +109,17 @@ fn extract_metadata(
                 metadata
                     .defined_symbols
                     .insert(spec_visible_symbol_name(&operation, &symbol_name));
+            }
+
+            if let Some(member_op) = MemberDefOpRefMut::from_option_raw(operation.to_raw()) {
+                let member_name = member_op.member_name().to_string();
+                collect_member_paths(
+                    &member_op,
+                    &member_name,
+                    member_op.member_type(),
+                    true,
+                    &mut metadata,
+                );
             }
 
             // Collect all the loop scopes
@@ -218,6 +237,90 @@ fn module_ancestor_names<'c: 'a, 'a>(operation: &impl OperationLike<'c, 'a>) -> 
     }
     names.reverse();
     names
+}
+
+fn collect_member_paths<'c: 'a, 'a>(
+    root: &impl OperationLike<'c, 'a>,
+    prefix: &str,
+    member_type: Type<'c>,
+    parent_accessible: bool,
+    metadata: &mut IrMetadata,
+) {
+    if let Ok(struct_type) = StructType::try_from(member_type) {
+        collect_struct_member_paths(root, prefix, struct_type, parent_accessible, metadata);
+    } else if let Ok(pod_type) = PodType::try_from(member_type) {
+        collect_pod_member_paths(root, prefix, pod_type, parent_accessible, metadata);
+    } else if let Ok(array_type) = ArrayType::try_from(member_type) {
+        collect_array_member_paths(root, prefix, array_type, parent_accessible, metadata);
+    }
+}
+
+fn collect_struct_member_paths<'c: 'a, 'a>(
+    root: &impl OperationLike<'c, 'a>,
+    prefix: &str,
+    struct_type: StructType<'c>,
+    parent_accessible: bool,
+    metadata: &mut IrMetadata,
+) {
+    let Ok(lookup) = struct_type.get_definition(root) else {
+        return;
+    };
+    let Some(operation) = lookup.get_operation() else {
+        return;
+    };
+    let Ok(struct_def) = StructDefOpRef::try_from(operation) else {
+        return;
+    };
+
+    for member in struct_def.get_member_defs() {
+        let path = format!("{prefix}.{}", member.member_name());
+        metadata.all_member_paths.insert(path.clone());
+        let accessible = parent_accessible && member.has_public_attr();
+        if accessible {
+            metadata.accessible_member_paths.insert(path.clone());
+        }
+        collect_member_paths(&member, &path, member.member_type(), accessible, metadata);
+    }
+}
+
+fn collect_pod_member_paths<'c: 'a, 'a>(
+    root: &impl OperationLike<'c, 'a>,
+    prefix: &str,
+    pod_type: PodType<'c>,
+    parent_accessible: bool,
+    metadata: &mut IrMetadata,
+) {
+    for record in pod_type.get_records() {
+        let record_name = record
+            .name()
+            .as_string_ref()
+            .as_str()
+            .unwrap_or("")
+            .trim_start_matches('@')
+            .to_string();
+        let path = format!("{prefix}.{record_name}");
+        metadata.all_member_paths.insert(path.clone());
+        if parent_accessible {
+            metadata.accessible_member_paths.insert(path.clone());
+        }
+        collect_member_paths(root, &path, record.r#type(), parent_accessible, metadata);
+    }
+}
+
+fn collect_array_member_paths<'c: 'a, 'a>(
+    root: &impl OperationLike<'c, 'a>,
+    prefix: &str,
+    array_type: ArrayType<'c>,
+    parent_accessible: bool,
+    metadata: &mut IrMetadata,
+) {
+    collect_member_paths(
+        root,
+        prefix,
+        array_type.element_type(),
+        parent_accessible,
+        metadata,
+    );
 }
 
 /// Returns the spec-visible name for an IR symbol.
