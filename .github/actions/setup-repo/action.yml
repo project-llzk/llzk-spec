@@ -4,9 +4,6 @@ description: Shared setup steps for CI jobs
 runs:
   using: composite
   steps:
-    - uses: actions/checkout@v6
-      with:
-        persist-credentials: false
     - uses: cachix/install-nix-action@9280e7aca88deada44c930f1e2c78e21c3ae3edd # v31.7.0
       with:
         install_url: https://releases.nixos.org/nix/nix-2.31.2/install
