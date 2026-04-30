@@ -3,7 +3,7 @@
 // END.
 
 contract for Parent {
-  ensure child.secret == 0;
+  ensure children[0].secret == 0;
 }
 
-// CHECK: member `child.secret` is not public
+// CHECK: member `children[].secret` is not public

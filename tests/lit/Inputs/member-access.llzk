@@ -15,6 +15,7 @@ module attributes { llzk.lang } {
   struct.def @Parent {
     struct.member @out : index
     struct.member @child : !struct.type<@Inner<[]>>
+    struct.member @children : !array.type<2 x !struct.type<@Inner<[]>>>
     struct.member @arr : !array.type<2 x index>
     struct.member @pod : !pod.type<[@count: index, @flag: index]>
     function.def @compute() -> !struct.type<@Parent<[]>> attributes {function.allow_non_native_field_ops, function.allow_witness} {

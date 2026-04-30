@@ -61,10 +61,9 @@ pub struct IrMetadata {
     /// Symbol names explicitly defined in the IR.
     pub defined_symbols: HashSet<String>,
     /// All nested member paths discovered from `struct.type` and `pod.type`
-    /// members, regardless of public visibility.
-    pub all_member_paths: HashSet<String>,
-    /// Member paths that specs are allowed to access.
-    pub accessible_member_paths: HashSet<String>,
+    /// members, mapping to whether or not they are public.
+    /// Used to verify if a given access is legal within a spec.
+    pub member_paths: HashMap<String, bool>,
     /// Explicit `loop_label` loops and generated `loopN` loops,
     /// scoped to their containing struct or free function.
     pub labeled_loops: HashMap<(LoopScope, String), LoopMetadata>,
@@ -90,8 +89,7 @@ fn extract_metadata(
 ) -> Result<IrMetadata, CompileError> {
     let mut metadata = IrMetadata {
         defined_symbols: HashSet::new(),
-        all_member_paths: HashSet::new(),
-        accessible_member_paths: HashSet::new(),
+        member_paths: HashMap::new(),
         labeled_loops: HashMap::new(),
     };
     let mut duplicate_loop_name = None;
@@ -274,11 +272,8 @@ fn collect_struct_member_paths<'c: 'a, 'a>(
 
     for member in struct_def.get_member_defs() {
         let path = format!("{prefix}.{}", member.member_name());
-        metadata.all_member_paths.insert(path.clone());
         let accessible = parent_accessible && member.has_public_attr();
-        if accessible {
-            metadata.accessible_member_paths.insert(path.clone());
-        }
+        metadata.member_paths.insert(path.clone(), accessible);
         collect_member_paths(&member, &path, member.member_type(), accessible, metadata);
     }
 }
@@ -299,14 +294,14 @@ fn collect_pod_member_paths<'c: 'a, 'a>(
             .trim_start_matches('@')
             .to_string();
         let path = format!("{prefix}.{record_name}");
-        metadata.all_member_paths.insert(path.clone());
-        if parent_accessible {
-            metadata.accessible_member_paths.insert(path.clone());
-        }
+        metadata
+            .member_paths
+            .insert(path.clone(), parent_accessible);
         collect_member_paths(root, &path, record.r#type(), parent_accessible, metadata);
     }
 }
 
+/// Collect member paths where the next path element is an array.
 fn collect_array_member_paths<'c: 'a, 'a>(
     root: &impl OperationLike<'c, 'a>,
     prefix: &str,
@@ -314,9 +309,14 @@ fn collect_array_member_paths<'c: 'a, 'a>(
     parent_accessible: bool,
     metadata: &mut IrMetadata,
 ) {
+    // We're not going to bounds check accesses here, so the prefix is mostly
+    // for debugging purposes. We technically don't need to include the brackets
+    // but it looks nicer in the diagnostics.
+    let num_dims = usize::try_from(array_type.num_dims()).expect("unexpected number of dimensions");
+    let indexed_prefix = format!("{prefix}{}", "[]".repeat(num_dims));
     collect_member_paths(
         root,
-        prefix,
+        &indexed_prefix,
         array_type.element_type(),
         parent_accessible,
         metadata,

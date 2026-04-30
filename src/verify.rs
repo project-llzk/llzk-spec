@@ -297,12 +297,12 @@ impl<'a> Verifier<'a> {
             Expression::Member { target, span, .. } => {
                 self.verify_expression(target, scopes, context);
                 if let Some(path) = self.expression_path(expression) {
-                    if self.ir.all_member_paths.contains(&path) {
-                        if !self.ir.accessible_member_paths.contains(&path) {
-                            self.push(format!("member `{path}` is not public"), Some(*span));
+                    match self.ir.member_paths.get(&path) {
+                        Some(accessible) if !accessible => {
+                            self.push(format!("member `{path}` is not public"), Some(*span))
                         }
-                    } else {
-                        self.push(format!("unknown identifier `{path}`"), Some(*span));
+                        None => self.push(format!("unknown identifier `{path}`"), Some(*span)),
+                        _ => (),
                     }
                 }
             }
@@ -383,6 +383,9 @@ impl<'a> Verifier<'a> {
     fn expression_path(&self, expression: &Expression) -> Option<String> {
         match expression {
             Expression::Symbol(identifier) => Some(identifier.name.clone()),
+            Expression::Index { target, .. } => {
+                Some(format!("{}[]", self.expression_path(target)?))
+            }
             Expression::Member { target, member, .. } => {
                 Some(format!("{}.{}", self.expression_path(target)?, member.name))
             }
@@ -443,22 +446,18 @@ mod tests {
 
     fn ir() -> IrMetadata {
         IrMetadata {
-            defined_symbols: ["Foo", "out", "in", "helper", "child", "pod"]
+            defined_symbols: ["Foo", "out", "in", "helper", "child", "children", "pod"]
                 .into_iter()
                 .map(str::to_string)
                 .collect(),
-            all_member_paths: [
-                "child.pub_out".to_string(),
-                "child.secret".to_string(),
-                "pod.count".to_string(),
-                "pod.flag".to_string(),
-            ]
-            .into_iter()
-            .collect(),
-            accessible_member_paths: [
-                "child.pub_out".to_string(),
-                "pod.count".to_string(),
-                "pod.flag".to_string(),
+            member_paths: [
+                ("child.pub_out".to_string(), true),
+                ("child.secret".to_string(), false),
+                ("children[].pub_out".to_string(), true),
+                ("children[].secret".to_string(), false),
+                ("multiples[][][].secret".to_string(), false),
+                ("pod.count".to_string(), true),
+                ("pod.flag".to_string(), true),
             ]
             .into_iter()
             .collect(),
@@ -569,6 +568,10 @@ contract for Foo {
         let document = parse_document("test.spec", source).expect("parse success");
         verify_document(&document, &ir(), "test.spec").expect("verify success");
 
+        let source = "contract for Foo { ensure children[0].pub_out == 0; }";
+        let document = parse_document("test.spec", source).expect("parse success");
+        verify_document(&document, &ir(), "test.spec").expect("verify success");
+
         let source = "contract for Foo { ensure child.secret == 0; }";
         let document = parse_document("test.spec", source).expect("parse success");
         let diagnostics =
@@ -578,5 +581,23 @@ contract for Foo {
                 .iter()
                 .any(|diag| { diag.message.contains("member `child.secret` is not public") })
         );
+
+        let source = "contract for Foo { ensure children[0].secret == 0; }";
+        let document = parse_document("test.spec", source).expect("parse success");
+        let diagnostics =
+            verify_document(&document, &ir(), "test.spec").expect_err("verify failure");
+        assert!(diagnostics.iter().any(|diag| {
+            diag.message
+                .contains("member `children[].secret` is not public")
+        }));
+
+        let source = "contract for Foo { ensure multiples[1][2][3].secret == 0; }";
+        let document = parse_document("test.spec", source).expect("parse success");
+        let diagnostics =
+            verify_document(&document, &ir(), "test.spec").expect_err("verify failure");
+        assert!(diagnostics.iter().any(|diag| {
+            diag.message
+                .contains("member `multiples[][][].secret` is not public")
+        }));
     }
 }
