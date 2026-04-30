@@ -23,5 +23,6 @@ target
 # llvm/clang
 default.profraw
 
-# nix flake
-result
+# Nix package build
+/result
+/build-tools
