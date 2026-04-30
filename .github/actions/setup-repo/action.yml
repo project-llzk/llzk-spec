@@ -15,6 +15,7 @@ runs:
         install_url: https://releases.nixos.org/nix/nix-2.31.2/install
         github_access_token: "${{ inputs.github_token }}"
     - name: Set Git credentials
+      shell: bash
       run: |
         git config --global 'url.https://api@github.com/'.insteadOf 'https://github.com/'
         git config --global 'url.https://ssh@github.com/'.insteadOf 'ssh://git@github.com/'
