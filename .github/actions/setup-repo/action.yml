@@ -13,7 +13,7 @@ runs:
     - uses: cachix/install-nix-action@9280e7aca88deada44c930f1e2c78e21c3ae3edd # v31.7.0
       with:
         install_url: https://releases.nixos.org/nix/nix-2.31.2/install
-        github_access_token: "${{ github_token }}"
+        github_access_token: "${{ inputs.github_token }}"
     - name: Set Git credentials
       run: |
         git config --global 'url.https://api@github.com/'.insteadOf 'https://github.com/'
@@ -22,4 +22,4 @@ runs:
     - uses: cachix/cachix-action@0fc020193b5a1fa3ac4575aa3a7d3aa6a35435ad # v16
       with:
         name: veridise-public
-        authToken: '${{ cachix_token }}'
+        authToken: '${{ inputs.cachix_token }}'
