@@ -318,8 +318,8 @@ impl<'a> Verifier<'a> {
             }
             Expression::Member { target, span, .. } => {
                 self.verify_expression(target, scopes, context);
-                if let Some(path) = self.expression_path(expression) {
-                    match context
+                match self.expression_path(expression) {
+                    Some(path) => match context
                         .contract_target
                         .as_deref()
                         .and_then(|target| self.ir.member_visibility(target, &path))
@@ -329,7 +329,8 @@ impl<'a> Verifier<'a> {
                         }
                         None => self.push(format!("unknown identifier `{path}`"), Some(*span)),
                         _ => (),
-                    }
+                    },
+                    None => self.push(format!("invalid expression"), Some(*span)),
                 }
             }
             Expression::Call { callee, args, .. } => {
@@ -454,6 +455,21 @@ impl<'a> Verifier<'a> {
             .any(|(scope, _)| scope == &function_scope)
         {
             return Some(function_scope);
+        }
+
+        let mut pieces: Vec<&str> = target.split("::").collect();
+        while pieces.len() > 1 {
+            pieces.pop();
+            let parent_target = pieces.join("::");
+            let struct_scope = LoopScope::Struct(parent_target);
+            if self
+                .ir
+                .labeled_loops
+                .keys()
+                .any(|(scope, _)| scope == &struct_scope)
+            {
+                return Some(struct_scope);
+            }
         }
 
         None
@@ -665,5 +681,39 @@ contract for Foo {
                 .iter()
                 .any(|diag| diag.message.contains("unknown identifier `local`"))
         );
+    }
+
+    #[test]
+    fn resolves_method_contract_targets_to_enclosing_struct_loop_scope() {
+        let ir = IrMetadata {
+            global_symbols: ["tmpl::Prod::product"]
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+            visible_symbols: [("tmpl::Prod::product".to_string(), HashSet::new())]
+                .into_iter()
+                .collect(),
+            member_paths: [("tmpl::Prod::product".to_string(), HashMap::new())]
+                .into_iter()
+                .collect(),
+            labeled_loops: [(
+                (
+                    LoopScope::Struct("tmpl::Prod".to_string()),
+                    "loop0".to_string(),
+                ),
+                LoopMetadata {
+                    kind: LoopKind::For,
+                    binding_count: 4,
+                    scope: LoopScope::Struct("tmpl::Prod".to_string()),
+                    explicit_label: false,
+                },
+            )]
+            .into_iter()
+            .collect::<HashMap<_, _>>(),
+        };
+
+        let source = "contract for tmpl::Prod::product { invariant for loop0(lb, i, ub, stride) { ensure i <= ub; } }";
+        let document = parse_document("test.spec", source).expect("parse success");
+        verify_document(&document, &ir, "test.spec").expect("verify success");
     }
 }

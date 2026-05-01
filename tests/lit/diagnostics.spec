@@ -4,6 +4,7 @@
 
 predicate dup() = true
 predicate dup() = true
+predicate noop() = true
 
 contract for Foo {
   let x = nondet;
@@ -17,6 +18,8 @@ contract for Foo {
   unused absent;
   return out;
   ensure x(6);
+  // This is the invalid expression
+  ensure noop().made_up_member == 0;
 }
 
 // CHECK-DAG: duplicate predicate `dup`
@@ -30,3 +33,4 @@ contract for Foo {
 // CHECK-DAG: unused references unknown symbol `absent`
 // CHECK-DAG: return is only valid inside predicates
 // CHECK-DAG: unknown predicate `x`
+// CHECK-DAG: invalid expression
