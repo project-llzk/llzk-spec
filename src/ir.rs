@@ -9,15 +9,16 @@ use llzk::context::LlzkContext;
 use llzk::dialect::{
     array::ArrayType,
     function::{FuncDefOpLike, is_func_def},
-    poly::{is_expr_op, is_param_op},
-    r#struct::{MemberDefOpLike, StructDefOpLike, StructType, is_struct_def, is_struct_member},
+    poly::is_expr_op,
+    r#struct::{MemberDefOpLike, StructDefOpLike, StructType, is_struct_def},
 };
 use llzk::operation::WalkOperationMutLike;
-use llzk::prelude::{FuncDefOpRefMut, MemberDefOpRefMut, PodType, StructDefOpRef};
+use llzk::prelude::{FuncDefOpRefMut, PodType, StructDefOpRef, TemplateOpLike};
 use melior::{
     dialect::DialectRegistry,
     ir::{
         Module, OperationRef, Type,
+        attribute::FlatSymbolRefAttribute,
         attribute::StringAttribute,
         operation::{OperationLike, WalkOrder, WalkResult},
     },
@@ -55,18 +56,51 @@ pub struct LoopMetadata {
     pub explicit_label: bool,
 }
 
+/// Contract-specific metadata derived from a contract target op (e.g., free function or struct).
+#[derive(Debug, Default, Clone)]
+struct ContractMetadata {
+    visible_symbols: HashSet<String>,
+    member_paths: HashMap<String, bool>,
+}
+
 /// Symbol metadata collected from a parsed LLZK IR module.
 #[derive(Debug, Clone)]
 pub struct IrMetadata {
-    /// Symbol names explicitly defined in the IR.
-    pub defined_symbols: HashSet<String>,
-    /// All nested member paths discovered from `struct.type` and `pod.type`
-    /// members, mapping to whether or not they are public.
-    /// Used to verify if a given access is legal within a spec.
-    pub member_paths: HashMap<String, bool>,
+    /// Contract targets (e.g., free functions and structs) explicitly defined in the IR.
+    pub global_symbols: HashSet<String>,
+    /// Names visible inside a contract, keyed by contract target.
+    pub visible_symbols: HashMap<String, HashSet<String>>,
+    /// Nested member paths visible from a contract target, keyed by contract target.
+    pub member_paths: HashMap<String, HashMap<String, bool>>,
     /// Explicit `loop_label` loops and generated `loopN` loops,
     /// scoped to their containing struct or free function.
     pub labeled_loops: HashMap<(LoopScope, String), LoopMetadata>,
+}
+
+impl IrMetadata {
+    /// Check if the IR contains the given global symbol.
+    ///
+    /// A global symbol is one that can have contracts written for it (i.e.,
+    /// LLZK structs and functions).
+    pub fn has_global_symbol(&self, name: &str) -> bool {
+        self.global_symbols.contains(name)
+    }
+
+    /// Check if the `name` symbol is visible from the perspective of a contract
+    /// written for `target`.
+    pub fn symbol_visible_in_contract(&self, target: &str, name: &str) -> bool {
+        self.visible_symbols
+            .get(target)
+            .is_some_and(|symbols| symbols.contains(name))
+    }
+
+    /// Check if a member with path `path` is visible from `target`.
+    pub fn member_visibility(&self, target: &str, path: &str) -> Option<bool> {
+        self.member_paths
+            .get(target)
+            .and_then(|paths| paths.get(path))
+            .copied()
+    }
 }
 
 /// Parses an LLZK IR module and extracts the metadata needed for symbol verification.
@@ -88,7 +122,8 @@ fn extract_metadata(
     module: &mut Module<'_>,
 ) -> Result<IrMetadata, CompileError> {
     let mut metadata = IrMetadata {
-        defined_symbols: HashSet::new(),
+        global_symbols: HashSet::new(),
+        visible_symbols: HashMap::new(),
         member_paths: HashMap::new(),
         labeled_loops: HashMap::new(),
     };
@@ -99,25 +134,41 @@ fn extract_metadata(
         .as_operation_mut()
         .walk_mut(WalkOrder::PreOrder, |operation| {
             // Collect all symbols from relevant symbol defining ops.
-            // TODO: Once we add `function.arg_name` attributes, we will collect
-            // those here as well.
-            if defines_symbol(&operation)
-                && let Some(symbol_name) = string_attribute(&operation, "sym_name")
+            if let Some(struct_op) = StructDefOpRef::from_option_raw(operation.to_raw())
+                && let Some(struct_name) = string_attribute(&operation, "sym_name")
             {
+                let target = struct_contract_target_name(&operation, &struct_name);
+                metadata.global_symbols.insert(target.clone());
+                let contract_metadata = collect_struct_contract_metadata(&struct_op);
                 metadata
-                    .defined_symbols
-                    .insert(spec_visible_symbol_name(&operation, &symbol_name));
+                    .visible_symbols
+                    .insert(target.clone(), contract_metadata.visible_symbols);
+                metadata
+                    .member_paths
+                    .insert(target, contract_metadata.member_paths);
             }
 
-            if let Some(member_op) = MemberDefOpRefMut::from_option_raw(operation.to_raw()) {
-                let member_name = member_op.member_name().to_string();
-                collect_member_paths(
-                    &member_op,
-                    &member_name,
-                    member_op.member_type(),
-                    true,
-                    &mut metadata,
-                );
+            if is_func_def(&operation)
+                && let Some(function_name) = string_attribute(&operation, "sym_name")
+            {
+                // TODO: Once we add `function.arg_name` attributes, we will collect
+                // those here as well.
+                let target = function_contract_target_name(&operation, &function_name);
+                metadata.global_symbols.insert(target.clone());
+                // Function may already be visible if it is a struct method, hence the check
+                if !metadata.visible_symbols.contains_key(&target) {
+                    let contract_metadata = collect_function_contract_metadata(
+                        &operation,
+                        &metadata.visible_symbols,
+                        &metadata.member_paths,
+                    );
+                    metadata
+                        .visible_symbols
+                        .insert(target.clone(), contract_metadata.visible_symbols);
+                    metadata
+                        .member_paths
+                        .insert(target, contract_metadata.member_paths);
+                }
             }
 
             // Collect all the loop scopes
@@ -167,16 +218,17 @@ fn extract_metadata(
     }
 }
 
+/// Get the parent of a given operation, if it exists.
+fn get_parent<'c: 'a, 'a>(op: &impl OperationLike<'c, 'a>) -> Option<OperationRef<'c, 'a>> {
+    // TODO: Once we update melior, we shouldn't need these unsafe handlers.
+    let raw_parent = unsafe { mlirOperationGetParentOperation(op.to_raw()) };
+    (!raw_parent.ptr.is_null()).then_some(unsafe { OperationRef::from_raw(raw_parent) })
+}
+
 /// Finds the owner scope for a loop. Struct methods use the nearest `struct.def`,
 /// standalone functions use the nearest `function.def`, and loops inside `poly.expr`
 /// are intentionally ignored.
 fn containing_loop_scope<'c: 'a, 'a>(operation: &impl OperationLike<'c, 'a>) -> Option<LoopScope> {
-    // TODO: Once we update melior, we shouldn't need these unsafe handlers.
-    fn get_parent<'c: 'a, 'a>(op: &impl OperationLike<'c, 'a>) -> Option<OperationRef<'c, 'a>> {
-        let raw_parent = unsafe { mlirOperationGetParentOperation(op.to_raw()) };
-        (!raw_parent.ptr.is_null()).then_some(unsafe { OperationRef::from_raw(raw_parent) })
-    }
-
     let mut opt_parent = get_parent(operation);
     let mut function_scope = None;
     while let Some(parent) = opt_parent {
@@ -186,47 +238,29 @@ fn containing_loop_scope<'c: 'a, 'a>(operation: &impl OperationLike<'c, 'a>) -> 
         if is_struct_def(&parent)
             && let Some(struct_name) = string_attribute(&parent, "sym_name")
         {
-            return Some(LoopScope::Struct(spec_visible_symbol_name(
-                &parent,
-                &struct_name,
-            )));
+            let struct_symbol = struct_contract_target_name(&parent, &struct_name);
+            return Some(LoopScope::Struct(struct_symbol));
         }
         if is_func_def(&parent)
             && let Some(function_name) = string_attribute(&parent, "sym_name")
         {
-            function_scope = Some(LoopScope::Function(spec_visible_symbol_name(
-                &parent,
-                &function_name,
-            )));
+            let function_symbol = function_contract_target_name(&parent, &function_name);
+            function_scope = Some(LoopScope::Function(function_symbol));
         }
         opt_parent = get_parent(&parent);
     }
     function_scope
 }
 
-/// Computes a fully qualified symbol name by prepending named enclosing
-/// `builtin.module` operations.
-fn qualified_symbol_name<'c: 'a, 'a>(
-    operation: &impl OperationLike<'c, 'a>,
-    symbol_name: &str,
-) -> String {
-    let mut components = module_ancestor_names(operation);
-    components.push(symbol_name.to_string());
-    components.join("::")
-}
-
-/// Returns the enclosing named builtin modules from outermost to innermost.
-fn module_ancestor_names<'c: 'a, 'a>(operation: &impl OperationLike<'c, 'a>) -> Vec<String> {
-    // TODO: Once we update melior, we shouldn't need these unsafe handlers.
-    fn get_parent<'c: 'a, 'a>(op: &impl OperationLike<'c, 'a>) -> Option<OperationRef<'c, 'a>> {
-        let raw_parent = unsafe { mlirOperationGetParentOperation(op.to_raw()) };
-        (!raw_parent.ptr.is_null()).then_some(unsafe { OperationRef::from_raw(raw_parent) })
-    }
-
+/// Returns the enclosing named modules/templates from outermost to innermost.
+fn symbol_ancestor_names<'c: 'a, 'a>(operation: &impl OperationLike<'c, 'a>) -> Vec<String> {
     let mut names = Vec::new();
     let mut opt_parent = get_parent(operation);
     while let Some(parent) = opt_parent {
-        if parent.name().as_string_ref().as_str().ok() == Some("builtin.module")
+        let op_name = parent.name();
+        let op_name = op_name.as_string_ref();
+        let op_name = op_name.as_str().ok();
+        if matches!(op_name, Some("builtin.module" | "poly.template"))
             && let Some(module_name) = string_attribute(&parent, "sym_name")
         {
             names.push(module_name);
@@ -237,19 +271,81 @@ fn module_ancestor_names<'c: 'a, 'a>(operation: &impl OperationLike<'c, 'a>) -> 
     names
 }
 
+/// Returns the enclosing named builtin modules from outermost to innermost.
+fn collect_struct_contract_metadata<'c: 'a, 'a>(
+    struct_op: &StructDefOpRef<'c, 'a>,
+) -> ContractMetadata {
+    let mut metadata = ContractMetadata::default();
+
+    for member in struct_op.get_member_defs() {
+        let member_name = member.member_name().to_string();
+        metadata.visible_symbols.insert(member_name.clone());
+        collect_member_paths(
+            struct_op,
+            &member_name,
+            member.member_type(),
+            true,
+            &mut metadata.member_paths,
+        );
+    }
+
+    for name in struct_op
+        .get_template_param_op_names()
+        .into_iter()
+        .chain(struct_op.get_template_expr_op_names())
+    {
+        metadata.visible_symbols.insert(flat_symbol_name(name));
+    }
+
+    metadata
+}
+
+fn collect_function_contract_metadata<'c: 'a, 'a>(
+    operation: &impl OperationLike<'c, 'a>,
+    visible_symbols: &HashMap<String, HashSet<String>>,
+    member_paths: &HashMap<String, HashMap<String, bool>>,
+) -> ContractMetadata {
+    if let Some(struct_target) = containing_struct_target(operation) {
+        return ContractMetadata {
+            visible_symbols: visible_symbols
+                .get(&struct_target)
+                .cloned()
+                .unwrap_or_default(),
+            member_paths: member_paths
+                .get(&struct_target)
+                .cloned()
+                .unwrap_or_default(),
+        };
+    }
+
+    let mut metadata = ContractMetadata::default();
+    if let Some(template) = containing_template_op(operation) {
+        for name in template
+            .const_param_names()
+            .into_iter()
+            .chain(template.const_expr_names())
+        {
+            metadata.visible_symbols.insert(flat_symbol_name(name));
+        }
+    }
+    metadata
+}
+
+/// Collect member reference paths to populate `member_paths`, using `root` as
+/// the root for symbol lookups, when needed.
 fn collect_member_paths<'c: 'a, 'a>(
     root: &impl OperationLike<'c, 'a>,
     prefix: &str,
     member_type: Type<'c>,
     parent_accessible: bool,
-    metadata: &mut IrMetadata,
+    member_paths: &mut HashMap<String, bool>,
 ) {
     if let Ok(struct_type) = StructType::try_from(member_type) {
-        collect_struct_member_paths(root, prefix, struct_type, parent_accessible, metadata);
+        collect_struct_member_paths(root, prefix, struct_type, parent_accessible, member_paths);
     } else if let Ok(pod_type) = PodType::try_from(member_type) {
-        collect_pod_member_paths(root, prefix, pod_type, parent_accessible, metadata);
+        collect_pod_member_paths(root, prefix, pod_type, parent_accessible, member_paths);
     } else if let Ok(array_type) = ArrayType::try_from(member_type) {
-        collect_array_member_paths(root, prefix, array_type, parent_accessible, metadata);
+        collect_array_member_paths(root, prefix, array_type, parent_accessible, member_paths);
     }
 }
 
@@ -258,7 +354,7 @@ fn collect_struct_member_paths<'c: 'a, 'a>(
     prefix: &str,
     struct_type: StructType<'c>,
     parent_accessible: bool,
-    metadata: &mut IrMetadata,
+    member_paths: &mut HashMap<String, bool>,
 ) {
     let Ok(lookup) = struct_type.get_definition(root) else {
         return;
@@ -273,8 +369,14 @@ fn collect_struct_member_paths<'c: 'a, 'a>(
     for member in struct_def.get_member_defs() {
         let path = format!("{prefix}.{}", member.member_name());
         let accessible = parent_accessible && member.has_public_attr();
-        metadata.member_paths.insert(path.clone(), accessible);
-        collect_member_paths(&member, &path, member.member_type(), accessible, metadata);
+        member_paths.insert(path.clone(), accessible);
+        collect_member_paths(
+            &member,
+            &path,
+            member.member_type(),
+            accessible,
+            member_paths,
+        );
     }
 }
 
@@ -283,7 +385,7 @@ fn collect_pod_member_paths<'c: 'a, 'a>(
     prefix: &str,
     pod_type: PodType<'c>,
     parent_accessible: bool,
-    metadata: &mut IrMetadata,
+    member_paths: &mut HashMap<String, bool>,
 ) {
     for record in pod_type.get_records() {
         let record_name = record
@@ -294,10 +396,14 @@ fn collect_pod_member_paths<'c: 'a, 'a>(
             .trim_start_matches('@')
             .to_string();
         let path = format!("{prefix}.{record_name}");
-        metadata
-            .member_paths
-            .insert(path.clone(), parent_accessible);
-        collect_member_paths(root, &path, record.r#type(), parent_accessible, metadata);
+        member_paths.insert(path.clone(), parent_accessible);
+        collect_member_paths(
+            root,
+            &path,
+            record.r#type(),
+            parent_accessible,
+            member_paths,
+        );
     }
 }
 
@@ -307,7 +413,7 @@ fn collect_array_member_paths<'c: 'a, 'a>(
     prefix: &str,
     array_type: ArrayType<'c>,
     parent_accessible: bool,
-    metadata: &mut IrMetadata,
+    member_paths: &mut HashMap<String, bool>,
 ) {
     // We're not going to bounds check accesses here, so the prefix is mostly
     // for debugging purposes. We technically don't need to include the brackets
@@ -319,24 +425,64 @@ fn collect_array_member_paths<'c: 'a, 'a>(
         &indexed_prefix,
         array_type.element_type(),
         parent_accessible,
-        metadata,
+        member_paths,
     );
 }
 
-/// Returns the spec-visible name for an IR symbol.
-///
-/// Contract targets should use fully qualified names when nested in named
-/// modules. Locals that are referenced inside contracts, such as struct members
-/// and `poly.param`s, remain unqualified.
-fn spec_visible_symbol_name<'c: 'a, 'a>(
+/// Convert a FlatSymbolRefAttribute to a String with normalization.
+fn flat_symbol_name(attribute: FlatSymbolRefAttribute<'_>) -> String {
+    attribute.to_string().trim_start_matches('@').to_string()
+}
+
+fn containing_struct_target<'c: 'a, 'a>(operation: &impl OperationLike<'c, 'a>) -> Option<String> {
+    let mut opt_parent = get_parent(operation);
+    while let Some(parent) = opt_parent {
+        if is_struct_def(&parent)
+            && let Some(struct_name) = string_attribute(&parent, "sym_name")
+        {
+            let target = struct_contract_target_name(&parent, &struct_name);
+            return Some(target);
+        }
+        opt_parent = get_parent(&parent);
+    }
+    None
+}
+
+fn containing_template_op<'c: 'a, 'a>(
+    operation: &impl OperationLike<'c, 'a>,
+) -> Option<llzk::prelude::TemplateOpRef<'c, 'a>> {
+    let mut opt_parent = get_parent(operation);
+    while let Some(parent) = opt_parent {
+        if let Some(template) = llzk::prelude::TemplateOpRef::from_option_raw(parent.to_raw()) {
+            return Some(template);
+        }
+        opt_parent = get_parent(&parent);
+    }
+    None
+}
+
+/// Returns the canonical fully qualified name for a struct contract target.
+fn struct_contract_target_name<'c: 'a, 'a>(
     operation: &impl OperationLike<'c, 'a>,
     symbol_name: &str,
 ) -> String {
-    if is_struct_def(operation) {
-        // TODO: We use this path because of a current todo! in llzk-rs in
-        // get_fully_qualified_name().
-        qualified_symbol_name(operation, symbol_name)
-    } else if let Some(func_op) = FuncDefOpRefMut::from_option_raw(operation.to_raw()) {
+    // TODO: We use this path because of a current todo! in llzk-rs in
+    // get_fully_qualified_name().
+    let mut components = symbol_ancestor_names(operation);
+    if components.is_empty() {
+        symbol_name.to_string()
+    } else {
+        components.push(symbol_name.to_string());
+        components.join("::")
+    }
+}
+
+/// Returns the canonical name for a function contract target.
+fn function_contract_target_name<'c: 'a, 'a>(
+    operation: &impl OperationLike<'c, 'a>,
+    symbol_name: &str,
+) -> String {
+    if let Some(func_op) = FuncDefOpRefMut::from_option_raw(operation.to_raw()) {
         func_op.fully_qualified_name().to_string()
     } else {
         symbol_name.to_string()
@@ -353,15 +499,6 @@ fn string_attribute<'c: 'a, 'a>(
         .ok()
         .and_then(|attribute| StringAttribute::try_from(attribute).ok())
         .map(|attribute| attribute.value().to_string())
-}
-
-/// Returns whether an operation contributes a new named symbol to the module.
-fn defines_symbol<'c: 'a, 'a>(operation: &impl OperationLike<'c, 'a>) -> bool {
-    is_struct_def(operation)
-        || is_struct_member(operation)
-        || is_func_def(operation)
-        || is_param_op(operation)
-        || is_expr_op(operation)
 }
 
 /// Returns loop scope, kind, and expected invariant binding count for supported loop ops.

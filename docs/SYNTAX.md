@@ -51,7 +51,9 @@ contract for Bar::Foo {
 Current target rules:
 
 - top-level `struct.def` and free `function.def` names are valid targets
-- nested module targets use `::`
+- any target nested under named containers uses its fully qualified name with `::`
+- named `poly.template` containers count here too, so template-defined structs are written as targets like `IsZero::IsZero`, `tmpl::empty`, or `OneHotTemplate::OneHot`
+- there are no shorthand aliases for contract targets
 - the verifier checks that the target exists in the LLZK IR
 
 Example: `tests/lit/nested-modules.spec`
@@ -78,7 +80,7 @@ referenced directly by name.
 If the LLZK IR does not expose a usable input symbol name using the `function.arg_name` attribute, use `arg[N]`:
 
 ```spec
-contract for IsZero {
+contract for IsZero::IsZero {
   ensure arg[0] == 0 ? out == 1 : out == 0;
 }
 ```
@@ -164,6 +166,10 @@ contract for Foo {
   ensure local(out);
 }
 ```
+
+Locally defined predicates capture the surrounding contract context. In the
+example above, `local` can reference `out` because it is visible from the
+enclosing contract target.
 
 Supported forms:
 

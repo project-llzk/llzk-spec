@@ -2,6 +2,6 @@
 // RUN: %llzk_spec --spec %s --llzk %S/Inputs/poly-expr.llzk
 // END.
 
-contract for empty {
+contract for tmpl::empty {
   ensure N == N;
 }

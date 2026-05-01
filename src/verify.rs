@@ -9,7 +9,9 @@ use std::collections::HashSet;
 /// One lexical scope frame for names introduced while verifying a block.
 #[derive(Debug, Default, Clone)]
 struct ScopeFrame {
+    /// Set of values that can be referenced by expressions in the current scope.
     values: HashSet<String>,
+    /// Set of predicates that can be called in the current scope.
     predicates: HashSet<String>,
 }
 
@@ -20,6 +22,7 @@ struct VerifyContext {
     in_invariant: bool,
     in_step: bool,
     loop_scope: Option<LoopScope>,
+    contract_target: Option<String>,
 }
 
 /// Verifies the parsed document against the LLZK IR metadata.
@@ -75,17 +78,30 @@ impl<'a> Verifier<'a> {
         }
     }
 
+    /// Searches for the named predicate starting from the most local scope to
+    /// the global scope.
+    fn predicate_in_scope(&self, scopes: &[ScopeFrame], predicate_name: &str) -> bool {
+        scopes
+            .iter()
+            .rev()
+            .map(|s| &s.predicates)
+            .chain(std::iter::once(&self.global_predicates))
+            .any(|predicates| predicates.contains(predicate_name))
+    }
+
     /// Verifies one top-level item in the document.
     fn verify_item(&mut self, item: &Item) {
         match item {
             Item::Contract(contract) => self.verify_contract(contract),
-            Item::Predicate(predicate) => self.verify_predicate(predicate, &[]),
+            Item::Predicate(predicate) => {
+                self.verify_predicate(predicate, &[], &VerifyContext::default())
+            }
         }
     }
 
     /// Verifies a contract body against IR-visible names and symbols.
     fn verify_contract(&mut self, contract: &ContractDecl) {
-        if !self.ir.defined_symbols.contains(&contract.target.name) {
+        if !self.ir.has_global_symbol(&contract.target.name) {
             self.push(
                 format!("unknown contract target `{}`", contract.target.name),
                 Some(contract.target.span),
@@ -95,13 +111,19 @@ impl<'a> Verifier<'a> {
         let mut scopes = vec![ScopeFrame::default()];
         let context = VerifyContext {
             loop_scope: self.contract_loop_scope(&contract.target.name),
+            contract_target: Some(contract.target.name.clone()),
             ..VerifyContext::default()
         };
         self.verify_block(&contract.body, &mut scopes, &context);
     }
 
     /// Verifies a predicate declaration with inherited outer lexical scopes.
-    fn verify_predicate(&mut self, predicate: &PredicateDecl, inherited: &[ScopeFrame]) {
+    fn verify_predicate(
+        &mut self,
+        predicate: &PredicateDecl,
+        inherited: &[ScopeFrame],
+        context: &VerifyContext,
+    ) {
         let mut scopes = inherited.to_vec();
         scopes.push(ScopeFrame::default());
         for param in &predicate.params {
@@ -109,16 +131,16 @@ impl<'a> Verifier<'a> {
         }
 
         match &predicate.body {
-            PredicateBody::Block(block) => {
-                let context = VerifyContext {
+            PredicateBody::Block(block) => self.verify_block(
+                block,
+                &mut scopes,
+                &VerifyContext {
                     in_predicate: true,
-                    ..VerifyContext::default()
-                };
-                self.verify_block(block, &mut scopes, &context)
-            }
+                    ..context.clone()
+                },
+            ),
             PredicateBody::Expr(expression) => {
-                let context = VerifyContext::default();
-                self.verify_expression(expression, &mut scopes, &context)
+                self.verify_expression(expression, &mut scopes, context)
             }
         }
     }
@@ -157,7 +179,7 @@ impl<'a> Verifier<'a> {
                 self.define_value(scopes, name, "duplicate local binding");
             }
             Statement::Unused { name, .. } => {
-                if !self.name_visible(scopes, &name.name) {
+                if !self.name_visible(scopes, context.contract_target.as_deref(), &name.name) {
                     self.push(
                         format!("unused references unknown symbol `{}`", name.name),
                         Some(name.span),
@@ -261,7 +283,7 @@ impl<'a> Verifier<'a> {
                         Some(predicate.name.span),
                     );
                 }
-                self.verify_predicate(predicate, scopes);
+                self.verify_predicate(predicate, scopes, context);
             }
             Statement::Empty { .. } => {}
         }
@@ -297,7 +319,11 @@ impl<'a> Verifier<'a> {
             Expression::Member { target, span, .. } => {
                 self.verify_expression(target, scopes, context);
                 if let Some(path) = self.expression_path(expression) {
-                    match self.ir.member_paths.get(&path) {
+                    match context
+                        .contract_target
+                        .as_deref()
+                        .and_then(|target| self.ir.member_visibility(target, &path))
+                    {
                         Some(accessible) if !accessible => {
                             self.push(format!("member `{path}` is not public"), Some(*span))
                         }
@@ -307,9 +333,9 @@ impl<'a> Verifier<'a> {
                 }
             }
             Expression::Call { callee, args, .. } => {
-                if !self.name_visible(scopes, &callee.name) {
+                if !self.predicate_in_scope(scopes, &callee.name) {
                     self.push(
-                        format!("unknown identifier `{}`", callee.name),
+                        format!("unknown predicate `{}`", callee.name),
                         Some(callee.span),
                     );
                 }
@@ -348,7 +374,8 @@ impl<'a> Verifier<'a> {
             // that way and use the `arg` lookup only as a backup.
             Expression::Arg { .. } => {}
             Expression::Symbol(identifier) => {
-                if !self.name_visible(scopes, &identifier.name) {
+                if !self.name_visible(scopes, context.contract_target.as_deref(), &identifier.name)
+                {
                     self.push(
                         format!("unknown identifier `{}`", identifier.name),
                         Some(identifier.span),
@@ -371,13 +398,18 @@ impl<'a> Verifier<'a> {
     }
 
     /// Returns whether a name is visible from lexical scopes, predicates, or IR.
-    fn name_visible(&self, scopes: &[ScopeFrame], name: &str) -> bool {
+    fn name_visible(
+        &self,
+        scopes: &[ScopeFrame],
+        contract_target: Option<&str>,
+        name: &str,
+    ) -> bool {
         scopes
             .iter()
             .rev()
             .any(|scope| scope.values.contains(name) || scope.predicates.contains(name))
-            || self.global_predicates.contains(name)
-            || self.ir.defined_symbols.contains(name)
+            || contract_target
+                .is_some_and(|target| self.ir.symbol_visible_in_contract(target, name))
     }
 
     fn expression_path(&self, expression: &Expression) -> Option<String> {
@@ -446,19 +478,38 @@ mod tests {
 
     fn ir() -> IrMetadata {
         IrMetadata {
-            defined_symbols: ["Foo", "out", "in", "helper", "child", "children", "pod"]
+            global_symbols: ["Foo"].into_iter().map(str::to_string).collect(),
+            visible_symbols: [(
+                "Foo".to_string(),
+                [
+                    "out",
+                    "in",
+                    "helper",
+                    "child",
+                    "children",
+                    "pod",
+                    "multiples",
+                ]
                 .into_iter()
                 .map(str::to_string)
                 .collect(),
-            member_paths: [
-                ("child.pub_out".to_string(), true),
-                ("child.secret".to_string(), false),
-                ("children[].pub_out".to_string(), true),
-                ("children[].secret".to_string(), false),
-                ("multiples[][][].secret".to_string(), false),
-                ("pod.count".to_string(), true),
-                ("pod.flag".to_string(), true),
-            ]
+            )]
+            .into_iter()
+            .collect(),
+            member_paths: [(
+                "Foo".to_string(),
+                [
+                    ("child.pub_out".to_string(), true),
+                    ("child.secret".to_string(), false),
+                    ("children[].pub_out".to_string(), true),
+                    ("children[].secret".to_string(), false),
+                    ("multiples[][][].secret".to_string(), false),
+                    ("pod.count".to_string(), true),
+                    ("pod.flag".to_string(), true),
+                ]
+                .into_iter()
+                .collect(),
+            )]
             .into_iter()
             .collect(),
             labeled_loops: [(

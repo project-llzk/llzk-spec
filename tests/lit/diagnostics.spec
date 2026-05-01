@@ -16,15 +16,17 @@ contract for Foo {
   step out == out;
   unused absent;
   return out;
+  ensure x(6);
 }
 
 // CHECK-DAG: duplicate predicate `dup`
 // CHECK-DAG: duplicate local binding `x`
 // CHECK-DAG: unknown identifier `missing`
-// CHECK-DAG: unknown identifier `missing_predicate`
+// CHECK-DAG: unknown predicate `missing_predicate`
 // CHECK-DAG: old is only valid inside step expressions
 // CHECK-DAG: increases is only valid inside invariants
 // CHECK-DAG: decreases is only valid inside invariants
 // CHECK-DAG: step is only valid inside invariants
 // CHECK-DAG: unused references unknown symbol `absent`
 // CHECK-DAG: return is only valid inside predicates
+// CHECK-DAG: unknown predicate `x`

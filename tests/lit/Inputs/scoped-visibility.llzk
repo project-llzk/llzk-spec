@@ -1,0 +1,44 @@
+module attributes { llzk.lang } {
+  poly.template @A {
+    poly.param @T
+
+    struct.def @Foo {
+      struct.member @out : index
+      struct.member @child : index
+      function.def @compute() -> !struct.type<@A::@Foo<[@T]>> attributes {function.allow_non_native_field_ops, function.allow_witness} {
+        %self = struct.new : <@A::@Foo<[@T]>>
+        function.return %self : !struct.type<@A::@Foo<[@T]>>
+      }
+      function.def @constrain(%arg0: !struct.type<@A::@Foo<[@T]>>) attributes {function.allow_constraint, function.allow_non_native_field_ops} {
+        function.return
+      }
+    }
+  }
+
+  poly.template @B {
+    poly.param @U
+
+    struct.def @Inner {
+      struct.member @pub_out : index {llzk.pub}
+      function.def @compute() -> !struct.type<@B::@Inner<[@U]>> attributes {function.allow_non_native_field_ops, function.allow_witness} {
+        %self = struct.new : <@B::@Inner<[@U]>>
+        function.return %self : !struct.type<@B::@Inner<[@U]>>
+      }
+      function.def @constrain(%arg0: !struct.type<@B::@Inner<[@U]>>) attributes {function.allow_constraint, function.allow_non_native_field_ops} {
+        function.return
+      }
+    }
+
+    struct.def @Bar {
+      struct.member @other : index
+      struct.member @child : !struct.type<@B::@Inner<[@U]>>
+      function.def @compute() -> !struct.type<@B::@Bar<[@U]>> attributes {function.allow_non_native_field_ops, function.allow_witness} {
+        %self = struct.new : <@B::@Bar<[@U]>>
+        function.return %self : !struct.type<@B::@Bar<[@U]>>
+      }
+      function.def @constrain(%arg0: !struct.type<@B::@Bar<[@U]>>) attributes {function.allow_constraint, function.allow_non_native_field_ops} {
+        function.return
+      }
+    }
+  }
+}

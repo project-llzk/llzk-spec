@@ -7,7 +7,7 @@ predicate bit_i_equals_out_i(in, out, i) {
   return bit_i == out[i];
 }
 
-contract for Num2Bits {
+contract for Num2Bits::Num2Bits {
   ensure forall o in out, o == 0 || o == 1;
   ensure forall i in 0..n, bit_i_equals_out_i(arg[0], out, i);
 }

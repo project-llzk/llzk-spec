@@ -2,7 +2,7 @@
 // RUN: %llzk_spec --spec %s --llzk %S/Inputs/doc-example-less-than-num2bits.llzk --emit-ast - --format json | FileCheck %s
 // END.
 
-contract for Num2Bits {
+contract for Num2Bits::Num2Bits {
   invariant for loop1(e2, i, lc1) {
     decreases n - i;
     step lc1 == old(lc1) + out[i] * e2;
@@ -11,7 +11,7 @@ contract for Num2Bits {
   }
 }
 
-// CHECK-DAG: "name": "Num2Bits"
+// CHECK-DAG: "name": "Num2Bits::Num2Bits"
 // CHECK-DAG: "kind": "invariant"
 // CHECK-DAG: "name": "loop1"
 // CHECK-DAG: "name": "e2"
