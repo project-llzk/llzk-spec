@@ -194,15 +194,22 @@ fn extract_metadata(
                     let index = loop_indices.entry(scope.clone()).or_default();
                     let loop_name = format!("loop{index}");
                     *index += 1;
-                    metadata.labeled_loops.insert(
-                        (scope.clone(), loop_name),
-                        LoopMetadata {
-                            kind,
-                            binding_count,
-                            scope,
-                            explicit_label: false,
-                        },
-                    );
+                    if metadata
+                        .labeled_loops
+                        .insert(
+                            (scope.clone(), loop_name.clone()),
+                            LoopMetadata {
+                                kind,
+                                binding_count,
+                                scope,
+                                explicit_label: false,
+                            },
+                        )
+                        .is_some()
+                    {
+                        duplicate_loop_name = Some(loop_name);
+                        return WalkResult::Interrupt;
+                    }
                 }
             }
 

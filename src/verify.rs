@@ -404,10 +404,7 @@ impl<'a> Verifier<'a> {
         contract_target: Option<&str>,
         name: &str,
     ) -> bool {
-        scopes
-            .iter()
-            .rev()
-            .any(|scope| scope.values.contains(name) || scope.predicates.contains(name))
+        scopes.iter().rev().any(|scope| scope.values.contains(name))
             || contract_target
                 .is_some_and(|target| self.ir.symbol_visible_in_contract(target, name))
     }
@@ -650,5 +647,23 @@ contract for Foo {
             diag.message
                 .contains("member `multiples[][][].secret` is not public")
         }));
+    }
+
+    #[test]
+    fn rejects_bare_predicate_identifiers_in_value_expressions() {
+        let source = r#"
+contract for Foo {
+  predicate local(x) = x == out;
+  ensure local;
+}
+"#;
+        let document = parse_document("test.spec", source).expect("parse success");
+        let diagnostics =
+            verify_document(&document, &ir(), "test.spec").expect_err("verify failure");
+        assert!(
+            diagnostics
+                .iter()
+                .any(|diag| diag.message.contains("unknown identifier `local`"))
+        );
     }
 }
