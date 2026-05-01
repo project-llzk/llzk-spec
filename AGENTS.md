@@ -71,6 +71,19 @@ Doc examples from the old language proposal have been extracted into
 focused lit tests when possible, and add parser/verifier unit tests for narrow lowering
 or semantic edge cases.
 
+## Documentation Upkeep
+
+- `docs/SYNTAX.md` is the hand-maintained user guide for writing specs.
+- When a language feature is added, changed, or removed, update `docs/SYNTAX.md`
+  in the same change.
+- Every newly documented author-facing feature should have lit coverage.
+- If a lit change alters author-facing behavior, review the guide and update it
+  if needed.
+- Prefer guide examples that match or are closely derived from `tests/lit/*.spec`.
+- Do not try to autogenerate the guide from the grammar alone; the important
+  behavior here includes naming rules, scope rules, and Phase 1 caveats that are
+  not captured well by syntax extraction.
+
 ## Development Workflow
 
 Use the Nix shell for normal development because the crate depends on the LLZK/MLIR

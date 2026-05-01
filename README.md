@@ -25,6 +25,10 @@ llzk-spec --spec path/to/spec.llzk-spec --llzk path/to/module.mlir
 llzk-spec --spec path/to/spec.llzk-spec --llzk path/to/module.mlir --emit-ast - --format json
 ```
 
+## Documentation
+
+The primary guide for writing specs is [docs/SYNTAX.md](docs/SYNTAX.md).
+
 ## Development
 
 Use the provided Nix shell:
