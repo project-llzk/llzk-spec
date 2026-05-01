@@ -1,5 +1,4 @@
 // REQUIRES: llzk-spec
-// RUN: %llzk_spec --spec %s --llzk %S/Inputs/member-access.llzk
 // RUN: %llzk_spec --spec %s --llzk %S/Inputs/member-access.llzk --emit-ast - --format json | FileCheck %s
 // END.
 
