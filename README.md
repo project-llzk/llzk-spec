@@ -27,7 +27,8 @@ llzk-spec --spec path/to/spec.llzk-spec --llzk path/to/module.mlir --emit-ast - 
 
 ## Documentation
 
-The primary guide for writing specs is [docs/SYNTAX.md](docs/SYNTAX.md).
+The high-level semantics and examples are described in [docs/DESIGN.md](docs/DESIGN.md).
+The concrete syntax reference is [docs/SYNTAX.md](docs/SYNTAX.md).
 
 ## Development
 

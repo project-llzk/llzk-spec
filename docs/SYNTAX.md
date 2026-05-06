@@ -1,33 +1,4 @@
-# Writing `llzk-spec` Specs
-
-`llzk-spec` is the specification frontend for LLZK IR. It currently:
-
-1. parses `.spec` files
-2. loads an LLZK IR module
-3. verifies that specs refers to real LLZK symbols, loop names, and nested members
-
-It does not yet lower to `verif`, perform rich type checking, or prove anything
-about the arithmetic beyond these structural checks.
-
-This guide is for writing valid specs against the current implementation.
-
-## Running The Tool
-
-Use the CLI with both a spec file and an LLZK IR file:
-
-```sh
-llzk-spec --spec path/to/spec.spec --llzk path/to/module.llzk
-llzk-spec --spec path/to/spec.spec --llzk path/to/module.llzk --emit-ast - --format json
-```
-
-In this repository, the normal development environment is:
-
-```sh
-nix develop
-cargo test
-```
-
-The end-to-end language examples live in `tests/lit/*.spec`.
+# `llzk-spec` Syntax
 
 ## Choosing A Contract Target
 

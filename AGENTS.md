@@ -73,9 +73,11 @@ or semantic edge cases.
 
 ## Documentation Upkeep
 
+- `docs/DESIGN.md` explains the language semantics, verification model, and examples
+  at a high level.
 - `docs/SYNTAX.md` is the hand-maintained user guide for writing specs.
-- When a language feature is added, changed, or removed, update `docs/SYNTAX.md`
-  in the same change.
+- When a language feature is added, changed, or removed, update `docs/DESIGN.md`
+  and `docs/SYNTAX.md` in the same change when the behavior is user-facing.
 - Every newly documented author-facing feature should have lit coverage.
 - If a lit change alters author-facing behavior, review the guide and update it
   if needed.
