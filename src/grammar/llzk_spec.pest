@@ -1,0 +1,325 @@
+WHITESPACE = _{ " " | "\t" | NEWLINE }
+NEWLINE    = _{ "\r\n" | "\n" }
+
+COMMENT = _{
+    line_comment
+  | block_comment
+}
+
+line_comment = _{ "//" ~ (!NEWLINE ~ ANY)* }
+block_comment = _{ "/*" ~ (!"*/" ~ ANY)* ~ "*/" }
+
+file = { SOI ~ item* ~ EOI }
+
+item = _{
+    contract_decl
+  | predicate_decl
+}
+
+contract_decl = {
+    "contract" ~ "for" ~ identifier ~ block
+}
+
+predicate_decl = {
+    "predicate" ~ identifier ~ param_list ~ (
+        block_predicate_body
+      | "=" ~ expression ~ semi?
+    )
+}
+
+block_predicate_body = {
+    block
+}
+
+param_list = {
+    "(" ~ (identifier ~ ("," ~ identifier)*)? ~ ")"
+}
+
+block = {
+    "{" ~ statement* ~ "}"
+}
+
+statement = _{
+    scoped_stmt
+  | require_stmt
+  | ensure_stmt
+  | let_stmt
+  | unused_stmt
+  | return_stmt
+  | increases_stmt
+  | decreases_stmt
+  | step_stmt
+  | invariant_decl
+  | predicate_decl
+  | block
+  | semi
+}
+
+scoped_stmt = {
+    scope_prefix ~ (
+        block
+      | require_stmt
+      | ensure_stmt
+      | let_stmt
+      | unused_stmt
+      | return_stmt
+      | increases_stmt
+      | decreases_stmt
+      | step_stmt
+      | invariant_decl
+    )
+}
+
+scope_prefix = {
+    "compute"
+  | "witness"
+  | "constrain"
+}
+
+require_stmt = {
+    "require" ~ expression ~ semi
+}
+
+ensure_stmt = {
+    "ensure" ~ expression ~ semi
+}
+
+let_stmt = {
+    "let" ~ identifier ~ "=" ~ (nondet_expr | expression) ~ semi
+}
+
+unused_stmt = {
+    "unused" ~ identifier ~ semi
+}
+
+return_stmt = {
+    "return" ~ expression ~ semi
+}
+
+increases_stmt = {
+    "increases" ~ expression ~ semi
+}
+
+decreases_stmt = {
+    "decreases" ~ expression ~ semi
+}
+
+step_stmt = {
+    "step" ~ expression ~ semi
+}
+
+// invariant for <loop_name> (<bindings>) { /* region */ }
+invariant_decl = {
+    "invariant" ~ "for" ~ identifier ~ "(" ~ binding_list ~ ")" ~ block
+}
+
+binding_list = {
+    identifier ~ ("," ~ identifier)*
+}
+
+semi = { ";" }
+
+expression = _{ conditional_expr }
+
+conditional_expr = {
+    logical_or_expr ~ ("?" ~ expression ~ ":" ~ expression)?
+}
+
+logical_or_expr = {
+    logical_and_expr ~ (or_op ~ logical_and_expr)*
+}
+
+logical_and_expr = {
+    equality_expr ~ (and_op ~ equality_expr)*
+}
+
+equality_expr = {
+    relational_expr ~ (eq_op ~ relational_expr)*
+}
+
+relational_expr = {
+    additive_expr ~ (rel_op ~ additive_expr)*
+}
+
+additive_expr = {
+    multiplicative_expr ~ (add_op ~ multiplicative_expr)*
+}
+
+multiplicative_expr = {
+    power_expr ~ (mul_op ~ power_expr)*
+}
+
+// Right-associative exponentiation
+power_expr = {
+    unary_expr ~ (pow_op ~ power_expr)?
+}
+
+unary_expr = {
+    unary_op* ~ postfix_expr
+}
+
+postfix_expr = {
+    primary_expr ~ postfix_op*
+}
+
+postfix_op = _{
+    index_op
+  | member_op
+  | call_suffix
+}
+
+index_op = {
+    "[" ~ expression ~ "]"
+}
+
+member_op = {
+    "." ~ identifier
+}
+
+call_suffix = {
+    "(" ~ (expression ~ ("," ~ expression)*)? ~ ")"
+}
+
+primary_expr = _{
+    quantifier_expr
+  | nondet_expr
+  | len_expr
+  | old_expr
+  | boolean
+  | number
+  | arg_ref
+  | identifier
+  | "(" ~ expression ~ ")"
+}
+
+// Supports:
+// forall i in arr, expr
+// exists i in 0..n, expr
+quantifier_expr = {
+    quantifier_kw ~ identifier ~ "in" ~ quantifier_domain ~ "," ~ expression
+}
+
+quantifier_kw = {
+    "forall"
+  | "exists"
+}
+
+quantifier_domain = {
+    range_expr
+  | expression
+}
+
+// Supports 0..n, (i+1)..N, 0..(N-1), etc.
+range_expr = {
+    expression ~ ".." ~ expression
+}
+
+len_expr = {
+    "len" ~ "(" ~ expression ~ ")"
+}
+
+old_expr = {
+    "old" ~ "(" ~ expression ~ ")"
+}
+
+nondet_expr = {
+    "nondet"
+}
+
+arg_ref = {
+    "arg" ~ "[" ~ number ~ "]"
+}
+
+boolean = {
+    "true"
+  | "false"
+}
+
+identifier = _{
+    escaped_symbol
+  | symbol
+}
+
+escaped_symbol = @{
+    "`" ~ escaped_symbol_char* ~ "`"
+}
+
+escaped_symbol_char = {
+    !"`" ~ ANY
+}
+
+symbol = @{
+    symbol_segment ~ ("::" ~ symbol_segment)*
+}
+
+symbol_segment = @{
+    !keyword ~ ident
+}
+
+ident = @{
+    (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")*
+}
+
+// "in" is intentionally not reserved globally.
+// It is treated contextually in quantifier_expr.
+keyword = {
+    reserved_keyword ~ !(ASCII_ALPHANUMERIC | "_")
+}
+
+reserved_keyword = {
+    "contract"
+  | "for"
+  | "predicate"
+  | "compute"
+  | "witness"
+  | "constrain"
+  | "require"
+  | "ensure"
+  | "let"
+  | "return"
+  | "forall"
+  | "exists"
+  | "unused"
+  | "invariant"
+  | "arg"
+  | "true"
+  | "false"
+}
+
+number = @{
+    ASCII_DIGIT+
+}
+
+or_op  = { "||" }
+and_op = { "&&" }
+
+eq_op = {
+    "=="
+  | "!="
+}
+
+rel_op = {
+    "<="
+  | ">="
+  | "<"
+  | ">"
+}
+
+add_op = {
+    "+"
+  | "-"
+}
+
+mul_op = {
+    "*"
+  | "/"
+  | "%"
+  | "&"
+}
+
+pow_op = { "**" }
+
+unary_op = {
+    "!"
+  | "-"
+}

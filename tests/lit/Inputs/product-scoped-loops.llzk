@@ -1,0 +1,30 @@
+module attributes { llzk.lang } {
+  poly.template @tmpl {
+    poly.expr @N {
+      %c0 = arith.constant 0 : index
+      %c1 = arith.constant 1 : index
+      %c2 = arith.constant 2 : index
+      %acc = arith.constant 0 : index
+      %sum = scf.for %i = %c0 to %c2 step %c1 iter_args(%running = %acc) -> (index) {
+        %next = arith.addi %running, %i : index
+        scf.yield %next : index
+      }
+      poly.yield %sum#0 : index
+    }
+
+    struct.def @Prod {
+      struct.member @out : index
+      function.def @product(%arg0: index) -> !struct.type<@tmpl::@Prod<[]>> {
+        %self = struct.new : <@tmpl::@Prod<[]>>
+        %c0 = arith.constant 0 : index
+        %c1 = arith.constant 1 : index
+        %c2 = arith.constant 2 : index
+        scf.for %i = %c0 to %c2 step %c1 {
+          scf.yield
+        }
+        struct.writem %self[@out] = %arg0 : <@tmpl::@Prod<[]>>, index
+        function.return %self : !struct.type<@tmpl::@Prod<[]>>
+      }
+    }
+  }
+}

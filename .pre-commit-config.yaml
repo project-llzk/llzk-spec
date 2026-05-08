@@ -1,0 +1,57 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: end-of-file-fixer
+        stages: [pre-commit]
+  - repo: local
+    hooks:
+      - id: cargo-fmt
+        name: cargo fmt
+        entry: cargo fmt --all
+        language: system
+        pass_filenames: false
+        stages: [pre-commit]
+      - id: nixfmt
+        name: nixfmt
+        entry: nixfmt
+        language: system
+        files: '\.nix$'
+        stages: [pre-commit]
+      - id: cargo-clippy
+        name: cargo clippy
+        entry: cargo clippy
+        language: system
+        pass_filenames: false
+        stages: [pre-commit]
+      # We use the "manual" stage to run check-only/read-only checks for CI.
+      # The other "pre-commit" checks will incur modifications that can immediately
+      # be staged for commit.
+      - id: check-end-of-file
+        name: check end of file
+        entry: >-
+          bash -c 'status=0; for file in "$@"; do [ -f "$file" ] || continue;
+          [ -s "$file" ] || continue; if [ "$(tail -c 1 "$file")" != "" ];
+          then echo "$file: missing newline at end of file"; status=1; fi;
+          done; exit "$status"' --
+        language: system
+        types: [text]
+        stages: [manual]
+      - id: cargo-fmt-check
+        name: cargo fmt --check
+        entry: cargo fmt --all -- --check
+        language: system
+        pass_filenames: false
+        stages: [manual]
+      - id: nixfmt-check
+        name: nixfmt --check
+        entry: nixfmt --check
+        language: system
+        files: '\.nix$'
+        stages: [manual]
+      - id: cargo-clippy-check
+        name: cargo clippy
+        entry: cargo clippy
+        language: system
+        pass_filenames: false
+        stages: [manual]
