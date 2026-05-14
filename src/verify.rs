@@ -130,19 +130,14 @@ impl<'a> Verifier<'a> {
             self.define_value(&mut scopes, param, "duplicate local binding");
         }
 
-        match &predicate.body {
-            PredicateBody::Block(block) => self.verify_block(
-                block,
-                &mut scopes,
-                &VerifyContext {
-                    in_predicate: true,
-                    ..context.clone()
-                },
-            ),
-            PredicateBody::Expr(expression) => {
-                self.verify_expression(expression, &mut scopes, context)
-            }
-        }
+        self.verify_block(
+            &predicate.body,
+            &mut scopes,
+            &VerifyContext {
+                in_predicate: true,
+                ..context.clone()
+            },
+        )
     }
 
     /// Verifies a block inside a fresh lexical scope frame.

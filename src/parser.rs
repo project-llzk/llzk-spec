@@ -98,7 +98,7 @@ impl<'a> Lowerer<'a> {
         Ok(ContractDecl { target, body, span })
     }
 
-    /// Lowers a predicate declaration in either block or inline-expression form.
+    /// Lowers a predicate declaration.
     fn predicate_decl(&self, pair: Pair<'a, Rule>) -> Result<PredicateDecl, Diagnostic> {
         let span = self.span(pair.as_span());
         let mut inner = pair.into_inner();
@@ -106,10 +106,16 @@ impl<'a> Lowerer<'a> {
         let params = self.param_list(inner.next().expect("predicate params"))?;
         let body_pair = inner.next().expect("predicate body");
         let body = match body_pair.as_rule() {
-            Rule::block_predicate_body => PredicateBody::Block(
-                self.block(body_pair.into_inner().next().expect("predicate block"))?,
-            ),
-            _ => PredicateBody::Expr(self.expression(body_pair)?),
+            Rule::block_predicate_body => {
+                self.block(body_pair.into_inner().next().expect("predicate block"))?
+            }
+            _ => Block {
+                statements: vec![Statement::Return {
+                    expression: self.expression(body_pair)?,
+                    span,
+                }],
+                span,
+            },
         };
 
         Ok(PredicateDecl {
@@ -603,6 +609,20 @@ predicate ok(x) { return x == 0; }
         }
     }
 
+    macro_rules! predicate_body_as_expr {
+        ($pattern:pat, $pred:expr, $err:expr) => {
+            let [
+                Statement::Return {
+                    expression: $pattern,
+                    ..
+                },
+            ] = &$pred.body.statements[..]
+            else {
+                panic!($err);
+            };
+        };
+    }
+
     #[test]
     fn preserves_expression_precedence() {
         let source = "predicate p(x) = x + 2 * 3 ** 4";
@@ -610,9 +630,11 @@ predicate ok(x) { return x == 0; }
         let Item::Predicate(predicate) = &document.items[0] else {
             panic!("expected predicate");
         };
-        let PredicateBody::Expr(Expression::Binary { op, right, .. }) = &predicate.body else {
-            panic!("expected additive expression");
-        };
+        predicate_body_as_expr!(
+            Expression::Binary { op, right, .. },
+            predicate,
+            "expected additive expression"
+        );
         assert_eq!(*op, BinaryOp::Add);
         let Expression::Binary { op, .. } = right.as_ref() else {
             panic!("expected multiplicative expression");
@@ -627,9 +649,11 @@ predicate ok(x) { return x == 0; }
         let Item::Predicate(predicate) = &document.items[0] else {
             panic!("expected predicate");
         };
-        let PredicateBody::Expr(Expression::Quantifier { domain, .. }) = &predicate.body else {
-            panic!("expected quantifier");
-        };
+        predicate_body_as_expr!(
+            Expression::Quantifier { domain, .. },
+            predicate,
+            "expected quantifier"
+        );
         assert!(matches!(domain, QuantifierDomain::Range { .. }));
     }
 

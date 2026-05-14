@@ -45,17 +45,17 @@ pub struct ContractDecl {
 pub struct PredicateDecl {
     pub name: Identifier,
     pub params: Vec<Identifier>,
-    pub body: PredicateBody,
+    pub body: Block,
     pub span: Span,
 }
 
-/// Predicate body representation.
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum PredicateBody {
-    Block(Block),
-    Expr(Expression),
-}
+///// Predicate body representation.
+//#[derive(Debug, Clone, PartialEq, Serialize)]
+//#[serde(tag = "kind", rename_all = "snake_case")]
+//pub enum PredicateBody {
+//    Block(Block),
+//    Expr(Expression),
+//}
 
 /// Sequence of statements with a lexical scope.
 #[derive(Debug, Clone, PartialEq, Serialize)]
