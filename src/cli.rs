@@ -7,6 +7,7 @@ use crate::ir::verif::emit_on_empty_module;
 use crate::parser::parse_document;
 use crate::verify::verify_document;
 use clap::{Parser, ValueEnum};
+use llzk::prelude::OperationLike;
 use std::fs;
 use std::path::PathBuf;
 
@@ -75,6 +76,9 @@ pub fn run(args: Args) -> Result<(), CompileError> {
     if let Some(Emit::Ir) = args.emit {
         let ctx = Context::new();
         let module = emit_on_empty_module(&ctx, &spec_name, &document, args.field.as_deref())?;
+        if !module.as_operation().verify() {
+            return Err(CompileError::Ir("spec module failed to verify".to_owned()));
+        }
         dump::write_ir(&module, args.emit_dest.as_ref(), args.emit_format)?;
     }
 

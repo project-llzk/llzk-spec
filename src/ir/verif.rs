@@ -105,13 +105,15 @@ impl<'ctx, 'blk> SpecCodegen<'ctx, 'blk> {
         inputs: &[Type<'ctx>],
         outputs: &[Type<'ctx>],
     ) -> Result<FuncDefOp<'ctx>, CompileError> {
-        Ok(function::def(
+        let op = function::def(
             self.location(span),
             name.as_ref(),
             self.func_type(inputs, outputs),
             &[],
             None,
-        )?)
+        )?;
+        op.set_allow_non_native_field_ops_attr(true);
+        Ok(op)
     }
 
     fn func_type(&self, ins: &[Type<'ctx>], outs: &[Type<'ctx>]) -> FunctionType<'ctx> {
@@ -350,7 +352,7 @@ impl<'ctx, 'blk> ast::Visitor<ast::Expression> for SpecCodegen<'ctx, 'blk> {
                     Mul => felt::mul(location, lhs, rhs)?,
                     Div => felt::div(location, lhs, rhs)?,
                     // felt.smod or felt.umod?
-                    Mod => todo!("mod expression is not supported yet"),
+                    Mod => felt::umod(location, lhs, rhs)?,
                     BitAnd => felt::bit_and(location, lhs, rhs)?,
                     Pow => felt::pow(location, lhs, rhs)?,
                 };
@@ -436,9 +438,11 @@ impl<'ctx, 'blk> Scope<'ctx, 'blk> {
         &mut self,
         func_op: FuncDefOp<'ctx>,
     ) -> Result<FuncDefOpRef<'ctx, 'blk>, CompileError> {
-        let name = func_op.name();
-        let name = name.as_string_ref();
-        let name = name.as_str()?;
+        let name = func_op
+            .attribute("sym_name")
+            .expect("'function.def' has 'sym_name' attribute");
+        let name = StringAttribute::try_from(name)?;
+        let name = name.value();
         if self.predicates.contains_key(name) {
             return Err(CompileError::Ir(format!("duplicate predicate '{name}'")));
         }
