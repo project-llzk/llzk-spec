@@ -272,15 +272,15 @@ impl ast::Visitor<ast::Statement> for SpecCodegen<'_, '_> {
             Ensure { .. } => todo!("ensure statement is not supported yet"),
             // TODO: We are considering that let expressions are not like Rust's in that they
             // won't shadow existing names. If they do, then we need to push a new scope.
-            // They way this AST works, pushing a new scope will make tricking to determine how
+            // They way this AST works, pushing a new scope will make it tricky to determine how
             // many pops we will need at the end to reach the baseline scope. This is because this
             // let expression only contains the binding and assumes that everything after will
             // depend on it. To allow shadowing with these AST structures we need to either make
-            // this let variant a _let-in_ kind of binding (`let {binding} := {expression} in {block}`) or
+            // this let variant a 'let-in' kind of binding (`let {binding} := {expression} in {block}`) or
             // wrap 'lets' inside blocks (that already handle pushing and poping scopes) with the
             // rest of the AST generated after. And because life is never that simple, this second
             // approach will require some handling of 'return' inside the block because they get
-            // wrapped in a `scf.execute_region` and`function.return` ops are terminators of
+            // wrapped in a `scf.execute_region` and `function.return` ops are terminators of
             // `function.def` ops (meaning, we can't have it inside the `scf.execute_region` op and they must be the
             // last op in the function's body).
             Let { name, value, .. } => {
