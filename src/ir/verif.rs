@@ -203,19 +203,17 @@ impl ast::Visitor<ast::PredicateDecl> for SpecCodegen<'_, '_> {
 
     fn visit(&mut self, decl: &ast::PredicateDecl) -> Self::Output {
         let bool_type = self.bool_type();
+        let param_types = vec![bool_type; decl.params.len()];
         // Create the FuncDefOp and insert it into the current block.
-        let func_op = self.create_func_def_op(
-            decl.span,
-            &decl.name,
-            &vec![bool_type; decl.params.len()],
-            &[bool_type],
-        )?;
+        let func_op = self.create_func_def_op(decl.span, &decl.name, &param_types, &[bool_type])?;
         // Insert the function into the predicates' bindings of the current scope.
         let func_op = self.top_mut().bind_predicate(func_op)?;
         // Push a new scope using the first block of the function
-        let block = func_op.region(0)?.first_block().ok_or_else(|| {
-            CompileError::Ir(format!("operation {func_op} does not have a block"))
-        })?;
+        let param_locations = decl.params.iter().map(|i| self.location(i.span));
+        let block_args = std::iter::zip(param_types, param_locations).collect::<Vec<_>>();
+        let block = func_op
+            .region(0)?
+            .append_block(::melior::ir::Block::new(&block_args));
         self.push(block);
         // Bind the formals to their block arguments.
         decl.params
