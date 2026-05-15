@@ -1,6 +1,24 @@
 //! Abstract syntax tree for `llzk-spec`.
 
+use num_bigint::BigUint;
 use serde::Serialize;
+
+/// Trait defining a visitor of AST entities.
+pub trait Visitor<E: Visitable> {
+    type Output;
+
+    fn visit(&mut self, entity: &E) -> Self::Output;
+}
+
+/// Trait defining a visitable entity of the AST.
+pub trait Visitable: Sized {
+    fn accept<V>(&self, visitor: &mut V) -> V::Output
+    where
+        V: Visitor<Self>,
+    {
+        visitor.visit(self)
+    }
+}
 
 /// Source location of an AST node.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -18,11 +36,20 @@ pub struct Identifier {
     pub span: Span,
 }
 
+impl AsRef<str> for Identifier {
+    fn as_ref(&self) -> &str {
+        &self.name
+    }
+}
+
 /// Parsed top-level document.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Document {
     pub items: Vec<Item>,
+    pub span: Span,
 }
+
+impl Visitable for Document {}
 
 /// Top-level declarations accepted by the language.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -32,6 +59,8 @@ pub enum Item {
     Predicate(PredicateDecl),
 }
 
+impl Visitable for Item {}
+
 /// Contract declaration attached to an LLZK symbol.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ContractDecl {
@@ -39,6 +68,8 @@ pub struct ContractDecl {
     pub body: Block,
     pub span: Span,
 }
+
+impl Visitable for ContractDecl {}
 
 /// Predicate declaration in block or inline-expression form.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -49,13 +80,7 @@ pub struct PredicateDecl {
     pub span: Span,
 }
 
-///// Predicate body representation.
-//#[derive(Debug, Clone, PartialEq, Serialize)]
-//#[serde(tag = "kind", rename_all = "snake_case")]
-//pub enum PredicateBody {
-//    Block(Block),
-//    Expr(Expression),
-//}
+impl Visitable for PredicateDecl {}
 
 /// Sequence of statements with a lexical scope.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -63,6 +88,8 @@ pub struct Block {
     pub statements: Vec<Statement>,
     pub span: Span,
 }
+
+impl Visitable for Block {}
 
 /// Statements supported by phase 1 of `llzk-spec`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -114,6 +141,8 @@ pub enum Statement {
     },
 }
 
+impl Visitable for Statement {}
+
 /// Execution scope qualifier for a statement or block.
 ///
 /// The source keywords `compute` and `witness` both lower to `Compute` (one may
@@ -133,6 +162,8 @@ pub struct InvariantDecl {
     pub body: Block,
     pub span: Span,
 }
+
+impl Visitable for InvariantDecl {}
 
 /// Expression language used by contracts and predicates.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -197,7 +228,7 @@ pub enum Expression {
         span: Span,
     },
     Number {
-        value: String,
+        value: BigUint,
         span: Span,
     },
     Symbol(Identifier),
@@ -225,6 +256,8 @@ impl Expression {
     }
 }
 
+impl Visitable for Expression {}
+
 /// Supported quantifier kinds.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -244,6 +277,8 @@ pub enum QuantifierDomain {
     },
     Expr(Box<Expression>),
 }
+
+impl Visitable for QuantifierDomain {}
 
 /// Binary operators recognized by the grammar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

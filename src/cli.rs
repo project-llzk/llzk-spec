@@ -2,7 +2,7 @@
 
 use crate::ast::Document;
 use crate::diagnostic::CompileError;
-use crate::ir::load_ir;
+use crate::ir::llzk::load_ir;
 use crate::parser::parse_document;
 use crate::verify::verify_document;
 use clap::{Parser, ValueEnum};

@@ -4,8 +4,11 @@
 //! [`llzk_spec.pest`](./grammar/llzk_spec.pest). The remainder of this module
 //! focuses on lowering the generated parse tree into the llzk-spec AST.
 
+use std::str::FromStr as _;
+
 use crate::ast::*;
 use crate::diagnostic::Diagnostic;
+use num_bigint::BigUint;
 use pest::Parser;
 use pest::Span as PestSpan;
 use pest::iterators::{Pair, Pairs};
@@ -71,12 +74,13 @@ impl<'a> Lowerer<'a> {
     /// Lowers the top-level file pair into a document.
     fn document(&self, mut pairs: Pairs<'a, Rule>) -> Result<Document, Diagnostic> {
         let file = pairs.next().expect("file pair");
+        let span = self.span(file.as_span());
         let items = file
             .into_inner()
             .filter(|pair| pair.as_rule() != Rule::EOI)
             .map(|pair| self.item(pair))
             .collect::<Result<Vec<_>, _>>()?;
-        Ok(Document { items })
+        Ok(Document { items, span })
     }
 
     /// Lowers a top-level item.
@@ -291,7 +295,13 @@ impl<'a> Lowerer<'a> {
                 span: self.span(pair.as_span()),
             }),
             Rule::number => Ok(Expression::Number {
-                value: pair.as_str().to_string(),
+                value: BigUint::from_str(pair.as_str()).map_err(|err| {
+                    Diagnostic::new(
+                        self.source_name,
+                        format!("failed to parse literal `{}`: {}", pair.as_str(), err),
+                        Some(self.span(pair.as_span())),
+                    )
+                })?,
                 span: self.span(pair.as_span()),
             }),
             Rule::symbol | Rule::escaped_symbol => Ok(Expression::Symbol(self.identifier(pair)?)),

@@ -3,7 +3,7 @@
 
 use crate::ast::*;
 use crate::diagnostic::Diagnostic;
-use crate::ir::{IrMetadata, LoopMetadata, LoopScope};
+use crate::ir::llzk::{IrMetadata, LoopMetadata, LoopScope};
 use std::collections::HashSet;
 
 /// One lexical scope frame for names introduced while verifying a block.
@@ -480,7 +480,7 @@ impl<'a> Verifier<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ir::{IrMetadata, LoopKind, LoopMetadata, LoopScope};
+    use crate::ir::llzk::{IrMetadata, LoopKind, LoopMetadata, LoopScope};
     use crate::parser::parse_document;
     use std::collections::HashMap;
 
