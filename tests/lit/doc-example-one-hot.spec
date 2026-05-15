@@ -1,5 +1,5 @@
 // REQUIRES: llzk-spec
-// RUN: %llzk_spec --spec %s --llzk %S/Inputs/doc-example-one-hot.llzk --emit-ast - --format json | FileCheck %s
+// RUN: %llzk_spec --spec %s --llzk %S/Inputs/doc-example-one-hot.llzk --emit=ast --emit-format json | FileCheck %s
 // END.
 
 contract for OneHotTemplate::OneHot {

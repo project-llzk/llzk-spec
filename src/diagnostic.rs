@@ -97,6 +97,8 @@ pub enum CompileError {
     Utf8(#[from] Utf8Error),
     #[error(transparent)]
     BigUint(#[from] num_bigint::ParseBigIntError),
+    #[error("cli error: {0}")]
+    Cli(String),
 }
 
 impl CompileError {

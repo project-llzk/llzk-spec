@@ -30,10 +30,16 @@ pub fn emit_on_empty_module<'ctx>(
     ctx: &'ctx Context,
     filename: &str,
     document: &ast::Document,
-    prime: Option<&'static str>,
+    prime: Option<&str>,
 ) -> Result<Module<'ctx>, CompileError> {
     let module = ctx.fresh_module(filename, document.span);
-    SpecCodegen::new(ctx, &module, filename.to_owned(), prime).emit_ir(document)?;
+    SpecCodegen::new(
+        ctx,
+        &module,
+        filename.to_owned(),
+        prime.map(ToOwned::to_owned),
+    )
+    .emit_ir(document)?;
     Ok(module)
 }
 
@@ -42,7 +48,7 @@ struct SpecCodegen<'ctx, 'blk> {
     ctx: &'ctx Context,
     scope: Vec<Scope<'ctx, 'blk>>,
     filename: String,
-    prime: Option<&'static str>,
+    prime: Option<String>,
     builder: OpBuilder<'ctx>,
 }
 
@@ -55,7 +61,7 @@ where
         ctx: &'ctx Context,
         module: &'blk Module<'ctx>,
         filename: String,
-        prime: Option<&'static str>,
+        prime: Option<String>,
     ) -> Self {
         Self {
             ctx,
@@ -117,7 +123,7 @@ impl<'ctx, 'blk> SpecCodegen<'ctx, 'blk> {
     }
 
     fn felt_type(&self) -> Type<'ctx> {
-        match self.prime {
+        match &self.prime {
             Some(prime) => FeltType::with_field(self.context(), prime),
             None => FeltType::new(self.context()),
         }
@@ -392,7 +398,8 @@ impl<'ctx, 'blk> ast::Visitor<ast::Expression> for SpecCodegen<'ctx, 'blk> {
                 self.top_mut().append_operation_with_result(op)
             }
             Number { value, .. } => {
-                let value = FeltConstAttribute::from_biguint(self.context(), value, self.prime);
+                let value =
+                    FeltConstAttribute::from_biguint(self.context(), value, self.prime.as_deref());
                 self.top_mut()
                     .append_operation_with_result(felt::constant(location, value)?)
             }
