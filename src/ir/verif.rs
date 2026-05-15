@@ -20,7 +20,7 @@ use melior::{
 };
 
 use crate::{
-    ast::{self, Visitable as _},
+    ast::{self, Visitable},
     diagnostic::CompileError,
     ir::Context,
 };
@@ -168,17 +168,22 @@ impl<'ctx, 'blk> SpecCodegen<'ctx, 'blk> {
     }
 }
 
-/// This macro calls `Visitable::accept` on `$target` using the given `$scope` after pushing
-/// a new block in the `$region`. After lowering, pops the scope and returns whatever the `accept`
-/// method returned.
-macro_rules! accept_in_new_scope {
-    ($region:ident, $scope:ident, $target:ident) => {{
-        let block_ref = $region.append_block(melior::ir::Block::new(&[]));
-        $scope.push(block_ref);
-        let result = $target.accept($scope)?;
-        $scope.pop();
-        result
-    }};
+fn accept_in_new_scope<'ctx, 'blk, V, R>(
+    region: &Region<'ctx>,
+    scope: &mut SpecCodegen<'ctx, 'blk>,
+    target: &V,
+    tail_cb: impl FnOnce(R, &mut SpecCodegen<'ctx, 'blk>) -> Result<R, CompileError>,
+) -> Result<R, CompileError>
+where
+    V: Visitable,
+    SpecCodegen<'ctx, 'blk>: ast::Visitor<V, Output = Result<R, CompileError>>,
+{
+    let block_ref = region.append_block(melior::ir::Block::new(&[]));
+    scope.push(block_ref);
+    let result = target.accept(scope)?;
+    let result = tail_cb(result, scope)?;
+    scope.pop();
+    Ok(result)
 }
 
 impl ast::Visitor<ast::Document> for SpecCodegen<'_, '_> {
@@ -258,7 +263,7 @@ impl ast::Visitor<ast::Statement> for SpecCodegen<'_, '_> {
                 // Wrap the body of the block to ensure that SSA values don't leak in case of bugs
                 // in the scope logic.
                 let region = Region::new();
-                accept_in_new_scope!(region, self, block);
+                accept_in_new_scope(&region, self, block, |_, _| Ok(()))?;
                 let op = scf::execute_region(&[], region, self.location(block.span));
                 self.top_mut().append_operation(op);
                 Ok(())
@@ -317,10 +322,28 @@ impl<'ctx, 'blk> ast::Visitor<ast::Expression> for SpecCodegen<'ctx, 'blk> {
             } => {
                 let condition = condition.accept(self)?;
                 let then_region = Region::new();
-                let then_result = accept_in_new_scope!(then_region, self, then_branch);
+                let then_result = accept_in_new_scope(
+                    &then_region,
+                    self,
+                    then_branch,
+                    |result, scope: &mut SpecCodegen<'ctx, 'blk>| {
+                        let op = scf::r#yield(&[result], location);
+                        scope.top_mut().append_operation(op);
+                        Ok(result)
+                    },
+                )?;
 
                 let else_region = Region::new();
-                let else_result = accept_in_new_scope!(else_region, self, else_branch);
+                let else_result = accept_in_new_scope(
+                    &else_region,
+                    self,
+                    else_branch,
+                    |result, scope: &mut SpecCodegen<'ctx, 'blk>| {
+                        let op = scf::r#yield(&[result], location);
+                        scope.top_mut().append_operation(op);
+                        Ok(result)
+                    },
+                )?;
                 if then_result.r#type() != else_result.r#type() {
                     return Err(CompileError::Ir(format!(
                         "incompatible type in conditional branches {} != {}",
@@ -373,9 +396,12 @@ impl<'ctx, 'blk> ast::Visitor<ast::Expression> for SpecCodegen<'ctx, 'blk> {
                     .iter()
                     .map(|expr| expr.accept(self))
                     .collect::<Result<Vec<_>, _>>()?;
-                let name = self.find_predicate(callee)?.name();
-                let name =
-                    FlatSymbolRefAttribute::new(self.context(), name.as_string_ref().as_str()?);
+                let name = StringAttribute::try_from(
+                    self.find_predicate(callee)?
+                        .attribute("sym_name")
+                        .expect("'function.def' has attribute 'sym_name'"),
+                )?;
+                let name = FlatSymbolRefAttribute::new(self.context(), name.value());
                 let op =
                     function::call(self.builder(), location, name, &args, &[self.bool_type()])?;
                 self.top_mut().append_operation_with_result(op)

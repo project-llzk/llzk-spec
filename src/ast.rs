@@ -10,6 +10,14 @@ pub trait Visitor<E: Visitable> {
     fn visit(&mut self, entity: &E) -> Self::Output;
 }
 
+impl<E: Visitable, V: Visitor<E>> Visitor<Box<E>> for V {
+    type Output = <V as Visitor<E>>::Output;
+
+    fn visit(&mut self, entity: &Box<E>) -> Self::Output {
+        entity.as_ref().accept(self)
+    }
+}
+
 /// Trait defining a visitable entity of the AST.
 pub trait Visitable: Sized {
     fn accept<V>(&self, visitor: &mut V) -> V::Output
@@ -19,6 +27,8 @@ pub trait Visitable: Sized {
         visitor.visit(self)
     }
 }
+
+impl<V: Visitable> Visitable for Box<V> {}
 
 /// Source location of an AST node.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
