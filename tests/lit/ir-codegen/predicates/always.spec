@@ -1,13 +1,12 @@
 // REQUIRES: llzk-spec
-// RUN: %llzk_spec --spec %s --llzk %S/Inputs/valid-unlabeled-for.llzk --emit=ir  | FileCheck %s
+// RUN: %llzk_spec --spec %s --llzk %S/../../Inputs/valid-unlabeled-for.llzk --emit=ir  | FileCheck %s
 // END.
 
 predicate always() = true
 
-// CHECK-DAG: "kind": "predicate"
-// CHECK-DAG: "name": "always"
-// CHECK-DAG: "name": "equals"
-// CHECK-DAG: "name": "local"
-// CHECK-DAG: "kind": "return"
-// CHECK-DAG: "kind": "call"
-// CHECK-DAG: "callee"
+// CHECK-LABEL: module attributes {llzk.lang} {
+// CHECK-NEXT:    function.def @always() -> i1 {
+// CHECK-NEXT:      %[[VAL_0:[0-9a-zA-Z_\.]+]] = arith.constant true
+// CHECK-NEXT:      function.return %[[VAL_0]] : i1
+// CHECK-NEXT:    }
+// CHECK-NEXT:  }
