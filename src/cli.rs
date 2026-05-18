@@ -76,8 +76,11 @@ pub fn run(args: Args) -> Result<(), CompileError> {
     // Wrap emitting the MLIR IR of the spec in `--emit=ir` since the verification logic currently
     // uses the AST.
     if let Some(Emit::Ir) = args.emit {
-        let ctx = Context::new();
-        let module = emit_on_empty_module(&ctx, &spec_name, &document, args.field.as_deref())?;
+        let ctx = match args.field {
+            Some(field) => Context::with_field(field),
+            None => Context::new(),
+        };
+        let module = emit_on_empty_module(&ctx, &spec_name, &document)?;
         if !module.as_operation().verify() {
             return Err(CompileError::Ir("spec module failed to verify".to_owned()));
         }

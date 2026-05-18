@@ -20,7 +20,7 @@ use melior::{
 };
 
 use crate::{
-    ast::{self, Visitable},
+    ast::{self, Spanned, Visitable},
     diagnostic::CompileError,
     ir::Context,
 };
@@ -30,16 +30,9 @@ pub fn emit_on_empty_module<'ctx>(
     ctx: &'ctx Context,
     filename: &str,
     document: &ast::Document,
-    prime: Option<&str>,
 ) -> Result<Module<'ctx>, CompileError> {
-    let module = ctx.fresh_module(filename, document.span);
-    SpecCodegen::new(
-        ctx,
-        &module,
-        filename.to_owned(),
-        prime.map(ToOwned::to_owned),
-    )
-    .emit_ir(document)?;
+    let module = ctx.fresh_module(filename, document.span());
+    SpecCodegen::new(ctx, &module, filename.to_owned()).emit_ir(document)?;
     Ok(module)
 }
 
@@ -48,7 +41,6 @@ struct SpecCodegen<'ctx, 'blk> {
     ctx: &'ctx Context,
     scope: Vec<Scope<'ctx, 'blk>>,
     filename: String,
-    prime: Option<String>,
     builder: OpBuilder<'ctx>,
 }
 
@@ -57,17 +49,11 @@ where
     'blk: 'ctx,
 {
     /// Creates a new code generator.
-    fn new(
-        ctx: &'ctx Context,
-        module: &'blk Module<'ctx>,
-        filename: String,
-        prime: Option<String>,
-    ) -> Self {
+    fn new(ctx: &'ctx Context, module: &'blk Module<'ctx>, filename: String) -> Self {
         Self {
             ctx,
             scope: vec![Scope::root(module)],
             filename,
-            prime,
             builder: OpBuilder::new(&ctx.context),
         }
     }
@@ -117,19 +103,15 @@ impl<'ctx, 'blk> SpecCodegen<'ctx, 'blk> {
     }
 
     fn func_type(&self, ins: &[Type<'ctx>], outs: &[Type<'ctx>]) -> FunctionType<'ctx> {
-        FunctionType::new(self.context(), ins, outs)
+        self.ctx.func_type(ins, outs)
     }
 
     fn bool_type(&self) -> Type<'ctx> {
-        IntegerType::new(self.context(), 1).into()
+        self.ctx.bool_type()
     }
 
     fn felt_type(&self) -> Type<'ctx> {
-        match &self.prime {
-            Some(prime) => FeltType::with_field(self.context(), prime),
-            None => FeltType::new(self.context()),
-        }
-        .into()
+        self.ctx.felt_type()
     }
 
     fn location(&self, span: ast::Span) -> Location<'ctx> {
@@ -153,7 +135,7 @@ impl<'ctx, 'blk> SpecCodegen<'ctx, 'blk> {
     fn find_symbol(&self, symbol: &ast::Identifier) -> Result<Value<'ctx, 'blk>, CompileError> {
         self.find_in_scope(
             |scope| scope.locals.get(symbol.as_ref()).copied(),
-            || CompileError::Ir(format!("local symbol '{}' not found", symbol.name)),
+            || CompileError::Ir(format!("local symbol '{}' not found", symbol.value())),
         )
     }
 
@@ -163,7 +145,7 @@ impl<'ctx, 'blk> SpecCodegen<'ctx, 'blk> {
     ) -> Result<FuncDefOpRef<'ctx, 'blk>, CompileError> {
         self.find_in_scope(
             |scope| scope.predicates.get(symbol.as_ref()).copied(),
-            || CompileError::Ir(format!("predicate symbol '{}' not found", symbol.name)),
+            || CompileError::Ir(format!("predicate symbol '{}' not found", symbol.value())),
         )
     }
 }
@@ -190,7 +172,10 @@ impl ast::Visitor<ast::Document<'_>> for SpecCodegen<'_, '_> {
     type Output = Result<(), CompileError>;
 
     fn visit(&mut self, document: &ast::Document) -> Self::Output {
-        document.items.iter().try_for_each(|item| item.accept(self))
+        document
+            .items()
+            .iter()
+            .try_for_each(|item| item.accept(self))
     }
 }
 
@@ -210,26 +195,27 @@ impl ast::Visitor<ast::PredicateDecl<'_>> for SpecCodegen<'_, '_> {
 
     fn visit(&mut self, decl: &ast::PredicateDecl) -> Self::Output {
         let bool_type = self.bool_type();
-        let param_types = vec![bool_type; decl.params.len()];
+        let param_types = vec![bool_type; decl.params().len()];
         // Create the FuncDefOp and insert it into the current block.
-        let func_op = self.create_func_def_op(decl.span, &decl.name, &param_types, &[bool_type])?;
+        let func_op =
+            self.create_func_def_op(decl.span(), &decl.name(), &param_types, &[bool_type])?;
         // Insert the function into the predicates' bindings of the current scope.
         let func_op = self.top_mut().bind_predicate(func_op)?;
         // Push a new scope using the first block of the function
-        let param_locations = decl.params.iter().map(|i| self.location(i.span));
+        let param_locations = decl.params().iter().map(|i| self.location(i.span()));
         let block_args = std::iter::zip(param_types, param_locations).collect::<Vec<_>>();
         let block = func_op
             .region(0)?
             .append_block(::melior::ir::Block::new(&block_args));
         self.push(block);
         // Bind the formals to their block arguments.
-        decl.params
+        decl.params()
             .iter()
             .enumerate()
             .map(
                 |(n, formal)| -> Result<(ast::Symbol, Value), CompileError> {
                     let value = Value::from(block.argument(n)?);
-                    Ok((formal.name, value))
+                    Ok((formal.symbol(), value))
                 },
             )
             .try_for_each(|r| {
@@ -237,7 +223,7 @@ impl ast::Visitor<ast::PredicateDecl<'_>> for SpecCodegen<'_, '_> {
                 self.top_mut().bind_local(name.into(), value)
             })?;
         // Lower the body of the predicate.
-        decl.body.accept(self)?;
+        decl.body().accept(self)?;
         self.pop();
         Ok(())
     }
@@ -248,7 +234,7 @@ impl ast::Visitor<ast::Block<'_>> for SpecCodegen<'_, '_> {
 
     fn visit(&mut self, block: &ast::Block) -> Self::Output {
         block
-            .statements
+            .statements()
             .iter()
             .try_for_each(|stmt| stmt.accept(self))
     }
@@ -266,7 +252,7 @@ impl ast::Visitor<ast::Statement<'_>> for SpecCodegen<'_, '_> {
                 // in the scope logic.
                 let region = Region::new();
                 accept_in_new_scope(&region, self, block, |_, _| Ok(()))?;
-                let op = scf::execute_region(&[], region, self.location(block.span));
+                let op = scf::execute_region(&[], region, self.location(block.span()));
                 self.top_mut().append_operation(op);
                 Ok(())
             }
@@ -287,7 +273,7 @@ impl ast::Visitor<ast::Statement<'_>> for SpecCodegen<'_, '_> {
             // last op in the function's body).
             Let { name, value, .. } => {
                 let value = value.accept(self)?;
-                self.top_mut().bind_local(name.name.into(), value)
+                self.top_mut().bind_local(name.value().into(), value)
             }
             Unused { .. } => todo!("unused statement is not supported yet"),
             Return { expression, span } => {
@@ -429,7 +415,7 @@ impl<'ctx, 'blk> ast::Visitor<ast::Expression<'_>> for SpecCodegen<'ctx, 'blk> {
                 let value = FeltConstAttribute::from_biguint(
                     self.context(),
                     value.value(),
-                    self.prime.as_deref(),
+                    self.ctx.prime(),
                 );
                 self.top_mut()
                     .append_operation_with_result(felt::constant(location, value)?)

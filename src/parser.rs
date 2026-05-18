@@ -30,20 +30,21 @@ pub fn parse_document<'a, 'ctx>(
     source: &str,
 ) -> Result<Document<'ctx>, Diagnostic> {
     let pairs = LlzkSpecParser::parse(Rule::file, source).map_err(|error| {
-        let (line, column) = match error.line_col {
-            pest::error::LineColLocation::Pos((line, column)) => (line, column),
-            pest::error::LineColLocation::Span((line, column), _) => (line, column),
-        };
-        Diagnostic::new(
-            source_name,
-            format!("syntax error: {error}"),
-            Some(Span {
+        let span = match error.line_col {
+            pest::error::LineColLocation::Pos((line, column)) => Span {
                 start: 0,
                 end: 0,
                 line,
                 column,
-            }),
-        )
+            },
+            pest::error::LineColLocation::Span((line, column), (start, end)) => Span {
+                start,
+                end,
+                line,
+                column,
+            },
+        };
+        Diagnostic::new(source_name, format!("syntax error: {error}"), Some(span))
     })?;
 
     Lowerer::new(source_name, ctx).document(pairs)
@@ -90,7 +91,7 @@ impl<'a, 'ctx> Lowerer<'a, 'ctx> {
             .filter(|pair| pair.as_rule() != Rule::EOI)
             .map(|pair| self.item(pair))
             .collect::<Result<Vec<_>, _>>()?;
-        Ok(Document { items, span })
+        Ok(Document::new(items, span))
     }
 
     /// Lowers a top-level item.
@@ -109,7 +110,7 @@ impl<'a, 'ctx> Lowerer<'a, 'ctx> {
         let mut inner = pair.into_inner();
         let target = self.identifier(inner.next().expect("contract target"))?;
         let body = self.block(inner.next().expect("contract body"))?;
-        Ok(ContractDecl { target, body, span })
+        Ok(ContractDecl::new(target, body, span))
     }
 
     /// Lowers a predicate declaration.
@@ -123,21 +124,16 @@ impl<'a, 'ctx> Lowerer<'a, 'ctx> {
             Rule::block_predicate_body => {
                 self.block(body_pair.into_inner().next().expect("predicate block"))?
             }
-            _ => Block {
-                statements: vec![Statement::Return {
+            _ => Block::new(
+                [Statement::Return {
                     expression: self.expression(body_pair)?,
                     span,
                 }],
                 span,
-            },
+            ),
         };
 
-        Ok(PredicateDecl {
-            name,
-            params,
-            body,
-            span,
-        })
+        Ok(PredicateDecl::new(name, params, body, span))
     }
 
     /// Lowers a parameter list.
@@ -154,7 +150,7 @@ impl<'a, 'ctx> Lowerer<'a, 'ctx> {
             .into_inner()
             .map(|pair| self.statement(pair))
             .collect::<Result<Vec<_>, _>>()?;
-        Ok(Block { statements, span })
+        Ok(Block::new(statements, span))
     }
 
     /// Lowers a statement.
@@ -249,12 +245,7 @@ impl<'a, 'ctx> Lowerer<'a, 'ctx> {
         let loop_name = self.identifier(inner.next().expect("loop name"))?;
         let bindings = self.binding_list(inner.next().expect("invariant bindings"))?;
         let body = self.block(inner.next().expect("invariant body"))?;
-        Ok(InvariantDecl {
-            loop_name,
-            bindings,
-            body,
-            span,
-        })
+        Ok(InvariantDecl::new(loop_name, bindings, body, span))
     }
 
     /// Lowers a comma-separated invariant binding list.
@@ -286,6 +277,7 @@ impl<'a, 'ctx> Lowerer<'a, 'ctx> {
                 Ok(Expression::Len {
                     target: Box::new(target),
                     span,
+                    meta: (),
                 })
             }
             Rule::old_expr => {
@@ -294,15 +286,18 @@ impl<'a, 'ctx> Lowerer<'a, 'ctx> {
                 Ok(Expression::Old {
                     expression: Box::new(expression),
                     span,
+                    meta: (),
                 })
             }
             Rule::arg_ref => self.arg_ref(pair),
             Rule::nondet_expr => Ok(Expression::Nondet {
                 span: self.span(pair.as_span()),
+                meta: (),
             }),
             Rule::boolean => Ok(Expression::Boolean {
                 value: pair.as_str() == "true",
                 span: self.span(pair.as_span()),
+                meta: (),
             }),
             Rule::number => self.number(pair),
             Rule::symbol | Rule::escaped_symbol => Ok(Expression::Symbol(self.identifier(pair)?)),
@@ -323,6 +318,7 @@ impl<'a, 'ctx> Lowerer<'a, 'ctx> {
         Ok(Expression::Number {
             value,
             span: self.span(pair.as_span()),
+            meta: (),
         })
     }
 
@@ -338,7 +334,11 @@ impl<'a, 'ctx> Lowerer<'a, 'ctx> {
                 Some(self.span(index_pair.as_span())),
             )
         })?;
-        Ok(Expression::Arg { index, span })
+        Ok(Expression::Arg {
+            index,
+            span,
+            meta: (),
+        })
     }
 
     /// Lowers a conditional expression, using `pest` for the condition subtree.
@@ -353,6 +353,7 @@ impl<'a, 'ctx> Lowerer<'a, 'ctx> {
                 then_branch: Box::new(self.expression(then_pair)?),
                 else_branch: Box::new(self.expression(else_pair)?),
                 span,
+                meta: (),
             })
         } else {
             Ok(condition)
@@ -381,6 +382,7 @@ impl<'a, 'ctx> Lowerer<'a, 'ctx> {
                     op,
                     expr: Box::new(rhs),
                     span: self.join_spans(operator.as_span(), rhs_span),
+                    meta: (),
                 })
             })
             .map_infix(|lhs, operator, rhs| {
@@ -393,6 +395,7 @@ impl<'a, 'ctx> Lowerer<'a, 'ctx> {
                     left: Box::new(lhs),
                     right: Box::new(rhs),
                     span: self.join_expression_spans(lhs_span, rhs_span),
+                    meta: (),
                 })
             })
             .parse(pair.into_inner())
@@ -411,16 +414,18 @@ impl<'a, 'ctx> Lowerer<'a, 'ctx> {
                         target: Box::new(expr),
                         index: Box::new(index),
                         span,
+                        meta: (),
                     };
                 }
                 Rule::member_op => {
                     let member =
                         self.identifier(suffix.into_inner().next().expect("member name"))?;
-                    let span = self.join_expression_spans(expr.span(), member.span);
+                    let span = self.join_expression_spans(expr.span(), member.span());
                     expr = Expression::Member {
                         target: Box::new(expr),
                         member,
                         span,
+                        meta: (),
                     };
                 }
                 Rule::call_suffix => {
@@ -439,8 +444,13 @@ impl<'a, 'ctx> Lowerer<'a, 'ctx> {
                             ));
                         }
                     };
-                    let span = self.join_start_to_suffix(callee.span, suffix_span);
-                    expr = Expression::Call { callee, args, span };
+                    let span = self.join_start_to_suffix(callee.span(), suffix_span);
+                    expr = Expression::Call {
+                        callee,
+                        args,
+                        span,
+                        meta: (),
+                    };
                 }
                 _ => return self.unexpected(suffix, "postfix suffix"),
             }
@@ -472,6 +482,7 @@ impl<'a, 'ctx> Lowerer<'a, 'ctx> {
             domain,
             body: Box::new(body),
             span,
+            meta: (),
         })
     }
 
@@ -505,10 +516,10 @@ impl<'a, 'ctx> Lowerer<'a, 'ctx> {
     /// Lowers a symbol occurrence into an identifier with source location.
     fn identifier(&self, pair: Pair<'a, Rule>) -> Result<Identifier<'ctx>, Diagnostic> {
         match pair.as_rule() {
-            Rule::symbol => Ok(Identifier {
-                name: self.ctx.symbol(pair.as_str()),
-                span: self.span(pair.as_span()),
-            }),
+            Rule::symbol => Ok(Identifier::new(
+                self.ctx.symbol(pair.as_str()),
+                self.span(pair.as_span()),
+            )),
             Rule::escaped_symbol => {
                 let span = self.span(pair.as_span());
                 let text = pair.as_str();
@@ -520,10 +531,7 @@ impl<'a, 'ctx> Lowerer<'a, 'ctx> {
                         Some(span),
                     ))
                 } else {
-                    Ok(Identifier {
-                        name: self.ctx.symbol(name),
-                        span,
-                    })
+                    Ok(Identifier::new(self.ctx.symbol(name), span))
                 }
             }
             _ => self.unexpected(pair, "identifier"),
@@ -627,12 +635,12 @@ predicate ok(x) { return x == 0; }
 "#;
         let ctx = AstContext::new();
         let document = parse_document(&ctx, "test.spec", source).expect("parse success");
-        assert_eq!(document.items.len(), 2);
-        match &document.items[0] {
+        assert_eq!(document.items().len(), 2);
+        match &document.items()[0] {
             Item::Contract(contract) => {
-                assert_eq!(contract.target.name, "Foo");
+                assert_eq!(contract.target().value(), "Foo");
                 assert!(matches!(
-                    contract.body.statements[1],
+                    contract.body().statements()[1],
                     Statement::Predicate(_)
                 ));
             }
@@ -647,7 +655,7 @@ predicate ok(x) { return x == 0; }
                     expression: $pattern,
                     ..
                 },
-            ] = &$pred.body.statements[..]
+            ] = &$pred.body().statements()[..]
             else {
                 panic!($err);
             };
@@ -659,7 +667,7 @@ predicate ok(x) { return x == 0; }
         let source = "predicate p(x) = x + 2 * 3 ** 4";
         let ctx = AstContext::new();
         let document = parse_document(&ctx, "test.spec", source).expect("parse success");
-        let Item::Predicate(predicate) = &document.items[0] else {
+        let Item::Predicate(predicate) = &document.items()[0] else {
             panic!("expected predicate");
         };
         predicate_body_as_expr!(
@@ -679,7 +687,7 @@ predicate ok(x) { return x == 0; }
         let source = "predicate p(xs) = forall i in 0..len(xs), xs[i] == 0";
         let ctx = AstContext::new();
         let document = parse_document(&ctx, "test.spec", source).expect("parse success");
-        let Item::Predicate(predicate) = &document.items[0] else {
+        let Item::Predicate(predicate) = &document.items()[0] else {
             panic!("expected predicate");
         };
         predicate_body_as_expr!(
@@ -695,10 +703,10 @@ predicate ok(x) { return x == 0; }
         let source = "contract for Foo { witness ensure out == 0; }";
         let ctx = AstContext::new();
         let document = parse_document(&ctx, "test.spec", source).expect("parse success");
-        let Item::Contract(contract) = &document.items[0] else {
+        let Item::Contract(contract) = &document.items()[0] else {
             panic!("expected contract");
         };
-        let Statement::Scoped { scope, .. } = &contract.body.statements[0] else {
+        let Statement::Scoped { scope, .. } = &contract.body().statements()[0] else {
             panic!("expected scoped statement");
         };
         assert_eq!(*scope, Scope::Compute);
@@ -709,10 +717,10 @@ predicate ok(x) { return x == 0; }
         let source = "contract for Foo { ensure len(arg[0]) == arg[0][i]; }";
         let ctx = AstContext::new();
         let document = parse_document(&ctx, "test.spec", source).expect("parse success");
-        let Item::Contract(contract) = &document.items[0] else {
+        let Item::Contract(contract) = &document.items()[0] else {
             panic!("expected contract");
         };
-        let Statement::Ensure { expression, .. } = &contract.body.statements[0] else {
+        let Statement::Ensure { expression, .. } = &contract.body().statements()[0] else {
             panic!("expected ensure statement");
         };
         let Expression::Binary { left, right, .. } = expression else {
@@ -734,10 +742,10 @@ predicate ok(x) { return x == 0; }
         let source = "contract for Foo { ensure child.arr_pub[0] == pod.count; }";
         let ctx = AstContext::new();
         let document = parse_document(&ctx, "test.spec", source).expect("parse success");
-        let Item::Contract(contract) = &document.items[0] else {
+        let Item::Contract(contract) = &document.items()[0] else {
             panic!("expected contract");
         };
-        let Statement::Ensure { expression, .. } = &contract.body.statements[0] else {
+        let Statement::Ensure { expression, .. } = &contract.body().statements()[0] else {
             panic!("expected ensure statement");
         };
         let Expression::Binary { left, right, .. } = expression else {
@@ -749,19 +757,19 @@ predicate ok(x) { return x == 0; }
         let Expression::Member { target, member, .. } = target.as_ref() else {
             panic!("expected member expression");
         };
-        assert_eq!(member.name, "arr_pub");
+        assert_eq!(member.value(), "arr_pub");
         assert!(matches!(
             target.as_ref(),
-            Expression::Symbol(identifier) if identifier.name == "child"
+            Expression::Symbol(identifier) if identifier.value() == "child"
         ));
 
         let Expression::Member { target, member, .. } = right.as_ref() else {
             panic!("expected member expression");
         };
-        assert_eq!(member.name, "count");
+        assert_eq!(member.value(), "count");
         assert!(matches!(
             target.as_ref(),
-            Expression::Symbol(identifier) if identifier.name == "pod"
+            Expression::Symbol(identifier) if identifier.value() == "pod"
         ));
     }
 
@@ -778,23 +786,23 @@ contract for Foo {
 "#;
         let ctx = AstContext::new();
         let document = parse_document(&ctx, "test.spec", source).expect("parse success");
-        let Item::Contract(contract) = &document.items[0] else {
+        let Item::Contract(contract) = &document.items()[0] else {
             panic!("expected contract");
         };
-        let Statement::Invariant(invariant) = &contract.body.statements[0] else {
+        let Statement::Invariant(invariant) = &contract.body().statements()[0] else {
             panic!("expected invariant");
         };
-        assert_eq!(invariant.loop_name.name, "loop0");
-        assert_eq!(invariant.bindings.len(), 4);
+        assert_eq!(invariant.loop_name().value(), "loop0");
+        assert_eq!(invariant.bindings().len(), 4);
         assert!(matches!(
-            invariant.body.statements[0],
+            invariant.body().statements()[0],
             Statement::Decreases { .. }
         ));
         assert!(matches!(
-            invariant.body.statements[1],
+            invariant.body().statements()[1],
             Statement::Increases { .. }
         ));
-        let Statement::Step { expression, .. } = &invariant.body.statements[2] else {
+        let Statement::Step { expression, .. } = &invariant.body().statements()[2] else {
             panic!("expected step");
         };
         let Expression::Binary { left, right, .. } = expression else {
@@ -802,7 +810,7 @@ contract for Foo {
         };
         assert!(matches!(
             left.as_ref(),
-            Expression::Symbol(identifier) if identifier.name == "i"
+            Expression::Symbol(identifier) if identifier.value() == "i"
         ));
         let Expression::Binary { left, .. } = right.as_ref() else {
             panic!("expected step transition");
@@ -827,12 +835,12 @@ contract for Foo {
         let source = "contract for `contract` { ensure `return` == `return`; }";
         let ctx = AstContext::new();
         let document = parse_document(&ctx, "test.spec", source).expect("parse success");
-        let Item::Contract(contract) = &document.items[0] else {
+        let Item::Contract(contract) = &document.items()[0] else {
             panic!("expected contract");
         };
-        assert_eq!(contract.target.name, "contract");
+        assert_eq!(contract.target().value(), "contract");
 
-        let Statement::Ensure { expression, .. } = &contract.body.statements[0] else {
+        let Statement::Ensure { expression, .. } = &contract.body().statements()[0] else {
             panic!("expected ensure statement");
         };
         let Expression::Binary { left, right, .. } = expression else {
@@ -840,11 +848,11 @@ contract for Foo {
         };
         assert!(matches!(
             left.as_ref(),
-            Expression::Symbol(identifier) if identifier.name == "return"
+            Expression::Symbol(identifier) if identifier.value() == "return"
         ));
         assert!(matches!(
             right.as_ref(),
-            Expression::Symbol(identifier) if identifier.name == "return"
+            Expression::Symbol(identifier) if identifier.value() == "return"
         ));
     }
 
@@ -853,10 +861,10 @@ contract for Foo {
         let source = "contract for Bar::Foo { ensure out == 0; }";
         let ctx = AstContext::new();
         let document = parse_document(&ctx, "test.spec", source).expect("parse success");
-        let Item::Contract(contract) = &document.items[0] else {
+        let Item::Contract(contract) = &document.items()[0] else {
             panic!("expected contract");
         };
-        assert_eq!(contract.target.name, "Bar::Foo");
+        assert_eq!(contract.target().value(), "Bar::Foo");
     }
 
     #[test]
@@ -864,13 +872,13 @@ contract for Foo {
         let source = "contract for Foo { invariant for for_label(lb, i, ub, stride) {} }";
         let ctx = AstContext::new();
         let document = parse_document(&ctx, "test.spec", source).expect("parse success");
-        let Item::Contract(contract) = &document.items[0] else {
+        let Item::Contract(contract) = &document.items()[0] else {
             panic!("expected contract");
         };
-        let Statement::Invariant(invariant) = &contract.body.statements[0] else {
+        let Statement::Invariant(invariant) = &contract.body().statements()[0] else {
             panic!("expected invariant");
         };
-        assert_eq!(invariant.loop_name.name, "for_label");
+        assert_eq!(invariant.loop_name().value(), "for_label");
     }
 
     #[test]
