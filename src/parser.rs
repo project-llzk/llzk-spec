@@ -24,7 +24,11 @@ use pest_derive::Parser;
 struct LlzkSpecParser;
 
 /// Parses a complete `llzk-spec` source file into an AST document.
-pub fn parse_document(source_name: &str, source: &str) -> Result<Document, Diagnostic> {
+pub fn parse_document<'a, 'ctx>(
+    ctx: &'ctx AstContext,
+    source_name: &'a str,
+    source: &str,
+) -> Result<Document<'ctx>, Diagnostic> {
     let pairs = LlzkSpecParser::parse(Rule::file, source).map_err(|error| {
         let (line, column) = match error.line_col {
             pest::error::LineColLocation::Pos((line, column)) => (line, column),
@@ -42,20 +46,22 @@ pub fn parse_document(source_name: &str, source: &str) -> Result<Document, Diagn
         )
     })?;
 
-    Lowerer::new(source_name).document(pairs)
+    Lowerer::new(source_name, ctx).document(pairs)
 }
 
 /// Lowers the `pest` parse tree into the AST.
-struct Lowerer<'a> {
+struct Lowerer<'a, 'ctx> {
     /// User-facing source name used in diagnostics, usually the spec file path.
     source_name: &'a str,
     /// Pratt parser used to lower precedence-sensitive expression subtrees.
     pratt: PrattParser<Rule>,
+    /// Context for the AST.
+    ctx: &'ctx AstContext,
 }
 
-impl<'a> Lowerer<'a> {
+impl<'a, 'ctx> Lowerer<'a, 'ctx> {
     /// Creates a new lowering context for a single source file.
-    fn new(source_name: &'a str) -> Self {
+    fn new(source_name: &'a str, ctx: &'ctx AstContext) -> Self {
         let pratt = PrattParser::new()
             // Operators are listed from lowest to highest precedence. `Assoc`
             // selects how chains at the same precedence group nest.
@@ -68,11 +74,15 @@ impl<'a> Lowerer<'a> {
             .op(Op::infix(Rule::pow_op, Assoc::Right))
             .op(Op::prefix(Rule::unary_op));
 
-        Self { source_name, pratt }
+        Self {
+            source_name,
+            pratt,
+            ctx,
+        }
     }
 
     /// Lowers the top-level file pair into a document.
-    fn document(&self, mut pairs: Pairs<'a, Rule>) -> Result<Document, Diagnostic> {
+    fn document(&self, mut pairs: Pairs<'a, Rule>) -> Result<Document<'ctx>, Diagnostic> {
         let file = pairs.next().expect("file pair");
         let span = self.span(file.as_span());
         let items = file
@@ -84,7 +94,7 @@ impl<'a> Lowerer<'a> {
     }
 
     /// Lowers a top-level item.
-    fn item(&self, pair: Pair<'a, Rule>) -> Result<Item, Diagnostic> {
+    fn item(&self, pair: Pair<'a, Rule>) -> Result<Item<'ctx>, Diagnostic> {
         match pair.as_rule() {
             Rule::item => self.item(pair.into_inner().next().expect("nested item")),
             Rule::contract_decl => Ok(Item::Contract(self.contract_decl(pair)?)),
@@ -94,7 +104,7 @@ impl<'a> Lowerer<'a> {
     }
 
     /// Lowers a contract declaration.
-    fn contract_decl(&self, pair: Pair<'a, Rule>) -> Result<ContractDecl, Diagnostic> {
+    fn contract_decl(&self, pair: Pair<'a, Rule>) -> Result<ContractDecl<'ctx>, Diagnostic> {
         let span = self.span(pair.as_span());
         let mut inner = pair.into_inner();
         let target = self.identifier(inner.next().expect("contract target"))?;
@@ -103,7 +113,7 @@ impl<'a> Lowerer<'a> {
     }
 
     /// Lowers a predicate declaration.
-    fn predicate_decl(&self, pair: Pair<'a, Rule>) -> Result<PredicateDecl, Diagnostic> {
+    fn predicate_decl(&self, pair: Pair<'a, Rule>) -> Result<PredicateDecl<'ctx>, Diagnostic> {
         let span = self.span(pair.as_span());
         let mut inner = pair.into_inner();
         let name = self.identifier(inner.next().expect("predicate name"))?;
@@ -131,14 +141,14 @@ impl<'a> Lowerer<'a> {
     }
 
     /// Lowers a parameter list.
-    fn param_list(&self, pair: Pair<'a, Rule>) -> Result<Vec<Identifier>, Diagnostic> {
+    fn param_list(&self, pair: Pair<'a, Rule>) -> Result<Vec<Identifier<'ctx>>, Diagnostic> {
         pair.into_inner()
             .map(|pair| self.identifier(pair))
             .collect()
     }
 
     /// Lowers a statement block.
-    fn block(&self, pair: Pair<'a, Rule>) -> Result<Block, Diagnostic> {
+    fn block(&self, pair: Pair<'a, Rule>) -> Result<Block<'ctx>, Diagnostic> {
         let span = self.span(pair.as_span());
         let statements = pair
             .into_inner()
@@ -148,7 +158,7 @@ impl<'a> Lowerer<'a> {
     }
 
     /// Lowers a statement.
-    fn statement(&self, pair: Pair<'a, Rule>) -> Result<Statement, Diagnostic> {
+    fn statement(&self, pair: Pair<'a, Rule>) -> Result<Statement<'ctx>, Diagnostic> {
         match pair.as_rule() {
             Rule::statement => self.statement(pair.into_inner().next().expect("statement")),
             Rule::scoped_stmt => self.scoped_stmt(pair),
@@ -210,7 +220,7 @@ impl<'a> Lowerer<'a> {
     }
 
     /// Lowers a scoped statement such as `compute ensure ...`.
-    fn scoped_stmt(&self, pair: Pair<'a, Rule>) -> Result<Statement, Diagnostic> {
+    fn scoped_stmt(&self, pair: Pair<'a, Rule>) -> Result<Statement<'ctx>, Diagnostic> {
         let span = self.span(pair.as_span());
         let mut inner = pair.into_inner();
         let scope = match inner.next().expect("scope prefix").as_str() {
@@ -233,7 +243,7 @@ impl<'a> Lowerer<'a> {
     }
 
     /// Lowers an invariant declaration.
-    fn invariant_decl(&self, pair: Pair<'a, Rule>) -> Result<InvariantDecl, Diagnostic> {
+    fn invariant_decl(&self, pair: Pair<'a, Rule>) -> Result<InvariantDecl<'ctx>, Diagnostic> {
         let span = self.span(pair.as_span());
         let mut inner = pair.into_inner();
         let loop_name = self.identifier(inner.next().expect("loop name"))?;
@@ -248,14 +258,14 @@ impl<'a> Lowerer<'a> {
     }
 
     /// Lowers a comma-separated invariant binding list.
-    fn binding_list(&self, pair: Pair<'a, Rule>) -> Result<Vec<Identifier>, Diagnostic> {
+    fn binding_list(&self, pair: Pair<'a, Rule>) -> Result<Vec<Identifier<'ctx>>, Diagnostic> {
         pair.into_inner()
             .map(|pair| self.identifier(pair))
             .collect()
     }
 
     /// Lowers an expression by dispatching to the generated `pest` parse tree.
-    fn expression(&self, pair: Pair<'a, Rule>) -> Result<Expression, Diagnostic> {
+    fn expression(&self, pair: Pair<'a, Rule>) -> Result<Expression<'ctx>, Diagnostic> {
         match pair.as_rule() {
             Rule::expression => self.expression(pair.into_inner().next().expect("expression")),
             Rule::conditional_expr => self.conditional_expression(pair),
@@ -294,24 +304,31 @@ impl<'a> Lowerer<'a> {
                 value: pair.as_str() == "true",
                 span: self.span(pair.as_span()),
             }),
-            Rule::number => Ok(Expression::Number {
-                value: BigUint::from_str(pair.as_str()).map_err(|err| {
-                    Diagnostic::new(
-                        self.source_name,
-                        format!("failed to parse literal `{}`: {}", pair.as_str(), err),
-                        Some(self.span(pair.as_span())),
-                    )
-                })?,
-                span: self.span(pair.as_span()),
-            }),
+            Rule::number => self.number(pair),
             Rule::symbol | Rule::escaped_symbol => Ok(Expression::Symbol(self.identifier(pair)?)),
             _ => self.unexpected(pair, "expression"),
         }
     }
 
+    /// Creates a big integer literal expression.
+    fn number(&self, pair: Pair<'a, Rule>) -> Result<Expression<'ctx>, Diagnostic> {
+        let biguint = BigUint::from_str(pair.as_str()).map_err(|err| {
+            Diagnostic::new(
+                self.source_name,
+                format!("failed to parse literal `{}`: {}", pair.as_str(), err),
+                Some(self.span(pair.as_span())),
+            )
+        })?;
+        let value = self.ctx.literal(biguint);
+        Ok(Expression::Number {
+            value,
+            span: self.span(pair.as_span()),
+        })
+    }
+
     /// Lowers `arg[N]`, a reference to an unnamed function argument (i.e., does
     /// not have the `function.arg_name` attribute).
-    fn arg_ref(&self, pair: Pair<'a, Rule>) -> Result<Expression, Diagnostic> {
+    fn arg_ref(&self, pair: Pair<'a, Rule>) -> Result<Expression<'ctx>, Diagnostic> {
         let span = self.span(pair.as_span());
         let index_pair = pair.into_inner().next().expect("arg index");
         let index = index_pair.as_str().parse::<usize>().map_err(|_| {
@@ -325,7 +342,7 @@ impl<'a> Lowerer<'a> {
     }
 
     /// Lowers a conditional expression, using `pest` for the condition subtree.
-    fn conditional_expression(&self, pair: Pair<'a, Rule>) -> Result<Expression, Diagnostic> {
+    fn conditional_expression(&self, pair: Pair<'a, Rule>) -> Result<Expression<'ctx>, Diagnostic> {
         let span = self.span(pair.as_span());
         let mut inner = pair.into_inner();
         let condition = self.expression(inner.next().expect("condition"))?;
@@ -343,7 +360,7 @@ impl<'a> Lowerer<'a> {
     }
 
     /// Lowers a precedence-sensitive expression using `pest`'s Pratt parser.
-    fn pratt_expression(&self, pair: Pair<'a, Rule>) -> Result<Expression, Diagnostic> {
+    fn pratt_expression(&self, pair: Pair<'a, Rule>) -> Result<Expression<'ctx>, Diagnostic> {
         self.pratt
             .map_primary(|primary| self.expression(primary))
             .map_prefix(|operator, rhs| {
@@ -382,7 +399,7 @@ impl<'a> Lowerer<'a> {
     }
 
     /// Lowers a postfix expression such as indexing or predicate calls.
-    fn postfix_expression(&self, pair: Pair<'a, Rule>) -> Result<Expression, Diagnostic> {
+    fn postfix_expression(&self, pair: Pair<'a, Rule>) -> Result<Expression<'ctx>, Diagnostic> {
         let mut inner = pair.into_inner();
         let mut expr = self.expression(inner.next().expect("postfix base"))?;
         for suffix in inner {
@@ -432,7 +449,7 @@ impl<'a> Lowerer<'a> {
     }
 
     /// Lowers a quantifier expression and its bound domain.
-    fn quantifier_expression(&self, pair: Pair<'a, Rule>) -> Result<Expression, Diagnostic> {
+    fn quantifier_expression(&self, pair: Pair<'a, Rule>) -> Result<Expression<'ctx>, Diagnostic> {
         let span = self.span(pair.as_span());
         let mut inner = pair.into_inner();
         let quantifier_kind = match inner.next().expect("quantifier kind").as_str() {
@@ -459,7 +476,10 @@ impl<'a> Lowerer<'a> {
     }
 
     /// Lowers a quantifier domain into either a range or general expression.
-    fn quantifier_domain(&self, pair: Pair<'a, Rule>) -> Result<QuantifierDomain, Diagnostic> {
+    fn quantifier_domain(
+        &self,
+        pair: Pair<'a, Rule>,
+    ) -> Result<QuantifierDomain<'ctx>, Diagnostic> {
         let pair = if pair.as_rule() == Rule::quantifier_domain {
             pair.into_inner().next().expect("quantifier domain body")
         } else {
@@ -483,10 +503,10 @@ impl<'a> Lowerer<'a> {
     }
 
     /// Lowers a symbol occurrence into an identifier with source location.
-    fn identifier(&self, pair: Pair<'a, Rule>) -> Result<Identifier, Diagnostic> {
+    fn identifier(&self, pair: Pair<'a, Rule>) -> Result<Identifier<'ctx>, Diagnostic> {
         match pair.as_rule() {
             Rule::symbol => Ok(Identifier {
-                name: pair.as_str().to_string(),
+                name: self.ctx.symbol(pair.as_str()),
                 span: self.span(pair.as_span()),
             }),
             Rule::escaped_symbol => {
@@ -501,7 +521,7 @@ impl<'a> Lowerer<'a> {
                     ))
                 } else {
                     Ok(Identifier {
-                        name: name.to_string(),
+                        name: self.ctx.symbol(name),
                         span,
                     })
                 }
@@ -605,7 +625,8 @@ contract for Foo {
 }
 predicate ok(x) { return x == 0; }
 "#;
-        let document = parse_document("test.spec", source).expect("parse success");
+        let ctx = AstContext::new();
+        let document = parse_document(&ctx, "test.spec", source).expect("parse success");
         assert_eq!(document.items.len(), 2);
         match &document.items[0] {
             Item::Contract(contract) => {
@@ -636,7 +657,8 @@ predicate ok(x) { return x == 0; }
     #[test]
     fn preserves_expression_precedence() {
         let source = "predicate p(x) = x + 2 * 3 ** 4";
-        let document = parse_document("test.spec", source).expect("parse success");
+        let ctx = AstContext::new();
+        let document = parse_document(&ctx, "test.spec", source).expect("parse success");
         let Item::Predicate(predicate) = &document.items[0] else {
             panic!("expected predicate");
         };
@@ -655,7 +677,8 @@ predicate ok(x) { return x == 0; }
     #[test]
     fn parses_quantifier_domain_range() {
         let source = "predicate p(xs) = forall i in 0..len(xs), xs[i] == 0";
-        let document = parse_document("test.spec", source).expect("parse success");
+        let ctx = AstContext::new();
+        let document = parse_document(&ctx, "test.spec", source).expect("parse success");
         let Item::Predicate(predicate) = &document.items[0] else {
             panic!("expected predicate");
         };
@@ -670,7 +693,8 @@ predicate ok(x) { return x == 0; }
     #[test]
     fn lowers_witness_scope_to_compute() {
         let source = "contract for Foo { witness ensure out == 0; }";
-        let document = parse_document("test.spec", source).expect("parse success");
+        let ctx = AstContext::new();
+        let document = parse_document(&ctx, "test.spec", source).expect("parse success");
         let Item::Contract(contract) = &document.items[0] else {
             panic!("expected contract");
         };
@@ -683,7 +707,8 @@ predicate ok(x) { return x == 0; }
     #[test]
     fn parses_argument_references() {
         let source = "contract for Foo { ensure len(arg[0]) == arg[0][i]; }";
-        let document = parse_document("test.spec", source).expect("parse success");
+        let ctx = AstContext::new();
+        let document = parse_document(&ctx, "test.spec", source).expect("parse success");
         let Item::Contract(contract) = &document.items[0] else {
             panic!("expected contract");
         };
@@ -707,7 +732,8 @@ predicate ok(x) { return x == 0; }
     #[test]
     fn parses_member_access_and_indexing() {
         let source = "contract for Foo { ensure child.arr_pub[0] == pod.count; }";
-        let document = parse_document("test.spec", source).expect("parse success");
+        let ctx = AstContext::new();
+        let document = parse_document(&ctx, "test.spec", source).expect("parse success");
         let Item::Contract(contract) = &document.items[0] else {
             panic!("expected contract");
         };
@@ -750,7 +776,8 @@ contract for Foo {
   }
 }
 "#;
-        let document = parse_document("test.spec", source).expect("parse success");
+        let ctx = AstContext::new();
+        let document = parse_document(&ctx, "test.spec", source).expect("parse success");
         let Item::Contract(contract) = &document.items[0] else {
             panic!("expected contract");
         };
@@ -785,16 +812,21 @@ contract for Foo {
 
     #[test]
     fn rejects_empty_invariant_binding_lists() {
-        let diagnostic =
-            parse_document("test.spec", "contract for Foo { invariant for loop0() {} }")
-                .expect_err("parse failure");
+        let ctx = AstContext::new();
+        let diagnostic = parse_document(
+            &ctx,
+            "test.spec",
+            "contract for Foo { invariant for loop0() {} }",
+        )
+        .expect_err("parse failure");
         assert!(diagnostic.message.contains("syntax error"));
     }
 
     #[test]
     fn parses_escaped_reserved_symbols() {
         let source = "contract for `contract` { ensure `return` == `return`; }";
-        let document = parse_document("test.spec", source).expect("parse success");
+        let ctx = AstContext::new();
+        let document = parse_document(&ctx, "test.spec", source).expect("parse success");
         let Item::Contract(contract) = &document.items[0] else {
             panic!("expected contract");
         };
@@ -819,7 +851,8 @@ contract for Foo {
     #[test]
     fn parses_fully_qualified_identifiers() {
         let source = "contract for Bar::Foo { ensure out == 0; }";
-        let document = parse_document("test.spec", source).expect("parse success");
+        let ctx = AstContext::new();
+        let document = parse_document(&ctx, "test.spec", source).expect("parse success");
         let Item::Contract(contract) = &document.items[0] else {
             panic!("expected contract");
         };
@@ -829,7 +862,8 @@ contract for Foo {
     #[test]
     fn allows_identifiers_with_keyword_prefixes() {
         let source = "contract for Foo { invariant for for_label(lb, i, ub, stride) {} }";
-        let document = parse_document("test.spec", source).expect("parse success");
+        let ctx = AstContext::new();
+        let document = parse_document(&ctx, "test.spec", source).expect("parse success");
         let Item::Contract(contract) = &document.items[0] else {
             panic!("expected contract");
         };
@@ -841,7 +875,8 @@ contract for Foo {
 
     #[test]
     fn rejects_empty_escaped_symbols() {
-        let diagnostic = parse_document("test.spec", "contract for Foo { ensure `` == 0; }")
+        let ctx = AstContext::new();
+        let diagnostic = parse_document(&ctx, "test.spec", "contract for Foo { ensure `` == 0; }")
             .expect_err("parse failure");
         assert!(
             diagnostic

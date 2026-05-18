@@ -68,7 +68,7 @@ impl<'a> Verifier<'a> {
     fn collect_global_predicates(&mut self, document: &Document) {
         for item in &document.items {
             if let Item::Predicate(predicate) = item
-                && !self.global_predicates.insert(predicate.name.name.clone())
+                && !self.global_predicates.insert(predicate.name.name.into())
             {
                 self.push(
                     format!("duplicate predicate `{}`", predicate.name.name),
@@ -101,7 +101,7 @@ impl<'a> Verifier<'a> {
 
     /// Verifies a contract body against IR-visible names and symbols.
     fn verify_contract(&mut self, contract: &ContractDecl) {
-        if !self.ir.has_global_symbol(&contract.target.name) {
+        if !self.ir.has_global_symbol(contract.target.name.as_ref()) {
             self.push(
                 format!("unknown contract target `{}`", contract.target.name),
                 Some(contract.target.span),
@@ -110,8 +110,8 @@ impl<'a> Verifier<'a> {
 
         let mut scopes = vec![ScopeFrame::default()];
         let context = VerifyContext {
-            loop_scope: self.contract_loop_scope(&contract.target.name),
-            contract_target: Some(contract.target.name.clone()),
+            loop_scope: self.contract_loop_scope(contract.target.name.as_ref()),
+            contract_target: Some(contract.target.name.into()),
             ..VerifyContext::default()
         };
         self.verify_block(&contract.body, &mut scopes, &context);
@@ -174,7 +174,11 @@ impl<'a> Verifier<'a> {
                 self.define_value(scopes, name, "duplicate local binding");
             }
             Statement::Unused { name, .. } => {
-                if !self.name_visible(scopes, context.contract_target.as_deref(), &name.name) {
+                if !self.name_visible(
+                    scopes,
+                    context.contract_target.as_deref(),
+                    name.name.as_ref(),
+                ) {
                     self.push(
                         format!("unused references unknown symbol `{}`", name.name),
                         Some(name.span),
@@ -227,7 +231,10 @@ impl<'a> Verifier<'a> {
                 );
             }
             Statement::Invariant(invariant) => {
-                match self.lookup_loop(&invariant.loop_name.name, context.loop_scope.as_ref()) {
+                match self.lookup_loop(
+                    invariant.loop_name.name.as_ref(),
+                    context.loop_scope.as_ref(),
+                ) {
                     Some(loop_metadata)
                         if loop_metadata.binding_count != invariant.bindings.len() =>
                     {
@@ -271,7 +278,7 @@ impl<'a> Verifier<'a> {
                     .last_mut()
                     .expect("scope")
                     .predicates
-                    .insert(predicate.name.name.clone())
+                    .insert(predicate.name.name.into())
                 {
                     self.push(
                         format!("duplicate predicate `{}`", predicate.name.name),
@@ -329,7 +336,7 @@ impl<'a> Verifier<'a> {
                 }
             }
             Expression::Call { callee, args, .. } => {
-                if !self.predicate_in_scope(scopes, &callee.name) {
+                if !self.predicate_in_scope(scopes, callee.name.as_ref()) {
                     self.push(
                         format!("unknown predicate `{}`", callee.name),
                         Some(callee.span),
@@ -370,8 +377,11 @@ impl<'a> Verifier<'a> {
             // that way and use the `arg` lookup only as a backup.
             Expression::Arg { .. } => {}
             Expression::Symbol(identifier) => {
-                if !self.name_visible(scopes, context.contract_target.as_deref(), &identifier.name)
-                {
+                if !self.name_visible(
+                    scopes,
+                    context.contract_target.as_deref(),
+                    identifier.name.as_ref(),
+                ) {
                     self.push(
                         format!("unknown identifier `{}`", identifier.name),
                         Some(identifier.span),
@@ -385,7 +395,7 @@ impl<'a> Verifier<'a> {
     /// Defines a local value in the current (innermost) lexical scope.
     fn define_value(&mut self, scopes: &mut [ScopeFrame], identifier: &Identifier, message: &str) {
         let scope = scopes.last_mut().expect("scope frame");
-        if !scope.values.insert(identifier.name.clone()) {
+        if !scope.values.insert(identifier.name.into()) {
             self.push(
                 format!("{message} `{}`", identifier.name),
                 Some(identifier.span),
@@ -407,7 +417,7 @@ impl<'a> Verifier<'a> {
 
     fn expression_path(&self, expression: &Expression) -> Option<String> {
         match expression {
-            Expression::Symbol(identifier) => Some(identifier.name.clone()),
+            Expression::Symbol(identifier) => Some(identifier.name.into()),
             Expression::Index { target, .. } => {
                 Some(format!("{}[]", self.expression_path(target)?))
             }
@@ -536,8 +546,13 @@ mod tests {
 
     #[test]
     fn rejects_missing_contract_target() {
-        let document = parse_document("test.spec", "contract for Missing { ensure out == 0; }")
-            .expect("parse success");
+        let ctx = AstContext::new();
+        let document = parse_document(
+            &ctx,
+            "test.spec",
+            "contract for Missing { ensure out == 0; }",
+        )
+        .expect("parse success");
         let diagnostics =
             verify_document(&document, &ir(), "test.spec").expect_err("verify failure");
         assert!(
@@ -549,8 +564,9 @@ mod tests {
 
     #[test]
     fn rejects_return_outside_predicate() {
-        let document =
-            parse_document("test.spec", "contract for Foo { return out; }").expect("parse success");
+        let ctx = AstContext::new();
+        let document = parse_document(&ctx, "test.spec", "contract for Foo { return out; }")
+            .expect("parse success");
         let diagnostics =
             verify_document(&document, &ir(), "test.spec").expect_err("verify failure");
         assert!(
@@ -569,7 +585,8 @@ contract for Foo {
   let x = helper;
 }
 "#;
-        let document = parse_document("test.spec", source).expect("parse success");
+        let ctx = AstContext::new();
+        let document = parse_document(&ctx, "test.spec", source).expect("parse success");
         let diagnostics =
             verify_document(&document, &ir(), "test.spec").expect_err("verify failure");
         assert_eq!(diagnostics.len(), 1);
@@ -580,11 +597,12 @@ contract for Foo {
     fn verifies_loop_binding_count() {
         let source =
             "contract for Foo { invariant for loop0(lb, i, ub, step) { ensure i >= lb; } }";
-        let document = parse_document("test.spec", source).expect("parse success");
+        let ctx = AstContext::new();
+        let document = parse_document(&ctx, "test.spec", source).expect("parse success");
         verify_document(&document, &ir(), "test.spec").expect("verify success");
 
         let source = "contract for Foo { invariant for loop0(i) { ensure i >= 0; } }";
-        let document = parse_document("test.spec", source).expect("parse success");
+        let document = parse_document(&ctx, "test.spec", source).expect("parse success");
         let diagnostics =
             verify_document(&document, &ir(), "test.spec").expect_err("verify failure");
         assert!(
@@ -603,11 +621,12 @@ contract for Foo {
   }
 }
 "#;
-        let document = parse_document("test.spec", source).expect("parse success");
+        let ctx = AstContext::new();
+        let document = parse_document(&ctx, "test.spec", source).expect("parse success");
         verify_document(&document, &ir(), "test.spec").expect("verify success");
 
         let source = "contract for Foo { ensure old(out) == out; step out == out; }";
-        let document = parse_document("test.spec", source).expect("parse success");
+        let document = parse_document(&ctx, "test.spec", source).expect("parse success");
         let diagnostics =
             verify_document(&document, &ir(), "test.spec").expect_err("verify failure");
         assert!(
@@ -624,15 +643,16 @@ contract for Foo {
     #[test]
     fn validates_nested_member_access() {
         let source = "contract for Foo { ensure child.pub_out == pod.count; }";
-        let document = parse_document("test.spec", source).expect("parse success");
+        let ctx = AstContext::new();
+        let document = parse_document(&ctx, "test.spec", source).expect("parse success");
         verify_document(&document, &ir(), "test.spec").expect("verify success");
 
         let source = "contract for Foo { ensure children[0].pub_out == 0; }";
-        let document = parse_document("test.spec", source).expect("parse success");
+        let document = parse_document(&ctx, "test.spec", source).expect("parse success");
         verify_document(&document, &ir(), "test.spec").expect("verify success");
 
         let source = "contract for Foo { ensure child.secret == 0; }";
-        let document = parse_document("test.spec", source).expect("parse success");
+        let document = parse_document(&ctx, "test.spec", source).expect("parse success");
         let diagnostics =
             verify_document(&document, &ir(), "test.spec").expect_err("verify failure");
         assert!(
@@ -642,7 +662,7 @@ contract for Foo {
         );
 
         let source = "contract for Foo { ensure children[0].secret == 0; }";
-        let document = parse_document("test.spec", source).expect("parse success");
+        let document = parse_document(&ctx, "test.spec", source).expect("parse success");
         let diagnostics =
             verify_document(&document, &ir(), "test.spec").expect_err("verify failure");
         assert!(diagnostics.iter().any(|diag| {
@@ -651,7 +671,7 @@ contract for Foo {
         }));
 
         let source = "contract for Foo { ensure multiples[1][2][3].secret == 0; }";
-        let document = parse_document("test.spec", source).expect("parse success");
+        let document = parse_document(&ctx, "test.spec", source).expect("parse success");
         let diagnostics =
             verify_document(&document, &ir(), "test.spec").expect_err("verify failure");
         assert!(diagnostics.iter().any(|diag| {
@@ -668,7 +688,8 @@ contract for Foo {
   ensure local;
 }
 "#;
-        let document = parse_document("test.spec", source).expect("parse success");
+        let ctx = AstContext::new();
+        let document = parse_document(&ctx, "test.spec", source).expect("parse success");
         let diagnostics =
             verify_document(&document, &ir(), "test.spec").expect_err("verify failure");
         assert!(
@@ -708,7 +729,8 @@ contract for Foo {
         };
 
         let source = "contract for tmpl::Prod::product { invariant for loop0(lb, i, ub, stride) { ensure i <= ub; } }";
-        let document = parse_document("test.spec", source).expect("parse success");
+        let ctx = AstContext::new();
+        let document = parse_document(&ctx, "test.spec", source).expect("parse success");
         verify_document(&document, &ir, "test.spec").expect("verify success");
     }
 }

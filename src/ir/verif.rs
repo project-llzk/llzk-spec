@@ -186,7 +186,7 @@ where
     Ok(result)
 }
 
-impl ast::Visitor<ast::Document> for SpecCodegen<'_, '_> {
+impl ast::Visitor<ast::Document<'_>> for SpecCodegen<'_, '_> {
     type Output = Result<(), CompileError>;
 
     fn visit(&mut self, document: &ast::Document) -> Self::Output {
@@ -194,7 +194,7 @@ impl ast::Visitor<ast::Document> for SpecCodegen<'_, '_> {
     }
 }
 
-impl ast::Visitor<ast::Item> for SpecCodegen<'_, '_> {
+impl ast::Visitor<ast::Item<'_>> for SpecCodegen<'_, '_> {
     type Output = Result<(), CompileError>;
 
     fn visit(&mut self, item: &ast::Item) -> Self::Output {
@@ -205,7 +205,7 @@ impl ast::Visitor<ast::Item> for SpecCodegen<'_, '_> {
     }
 }
 
-impl ast::Visitor<ast::PredicateDecl> for SpecCodegen<'_, '_> {
+impl ast::Visitor<ast::PredicateDecl<'_>> for SpecCodegen<'_, '_> {
     type Output = Result<(), CompileError>;
 
     fn visit(&mut self, decl: &ast::PredicateDecl) -> Self::Output {
@@ -226,13 +226,15 @@ impl ast::Visitor<ast::PredicateDecl> for SpecCodegen<'_, '_> {
         decl.params
             .iter()
             .enumerate()
-            .map(|(n, formal)| -> Result<(String, Value), CompileError> {
-                let value = Value::from(block.argument(n)?);
-                Ok((formal.name.clone(), value))
-            })
+            .map(
+                |(n, formal)| -> Result<(ast::Symbol, Value), CompileError> {
+                    let value = Value::from(block.argument(n)?);
+                    Ok((formal.name, value))
+                },
+            )
             .try_for_each(|r| {
                 let (name, value) = r?;
-                self.top_mut().bind_local(name, value)
+                self.top_mut().bind_local(name.into(), value)
             })?;
         // Lower the body of the predicate.
         decl.body.accept(self)?;
@@ -241,7 +243,7 @@ impl ast::Visitor<ast::PredicateDecl> for SpecCodegen<'_, '_> {
     }
 }
 
-impl ast::Visitor<ast::Block> for SpecCodegen<'_, '_> {
+impl ast::Visitor<ast::Block<'_>> for SpecCodegen<'_, '_> {
     type Output = Result<(), CompileError>;
 
     fn visit(&mut self, block: &ast::Block) -> Self::Output {
@@ -252,7 +254,7 @@ impl ast::Visitor<ast::Block> for SpecCodegen<'_, '_> {
     }
 }
 
-impl ast::Visitor<ast::Statement> for SpecCodegen<'_, '_> {
+impl ast::Visitor<ast::Statement<'_>> for SpecCodegen<'_, '_> {
     type Output = Result<(), CompileError>;
 
     fn visit(&mut self, stmt: &ast::Statement) -> Self::Output {
@@ -285,7 +287,7 @@ impl ast::Visitor<ast::Statement> for SpecCodegen<'_, '_> {
             // last op in the function's body).
             Let { name, value, .. } => {
                 let value = value.accept(self)?;
-                self.top_mut().bind_local(name.name.clone(), value)
+                self.top_mut().bind_local(name.name.into(), value)
             }
             Unused { .. } => todo!("unused statement is not supported yet"),
             Return { expression, span } => {
@@ -305,7 +307,7 @@ impl ast::Visitor<ast::Statement> for SpecCodegen<'_, '_> {
     }
 }
 
-impl<'ctx, 'blk> ast::Visitor<ast::Expression> for SpecCodegen<'ctx, 'blk> {
+impl<'ctx, 'blk> ast::Visitor<ast::Expression<'_>> for SpecCodegen<'ctx, 'blk> {
     type Output = Result<Value<'ctx, 'blk>, CompileError>;
 
     fn visit(&mut self, expr: &ast::Expression) -> Self::Output {
@@ -424,8 +426,11 @@ impl<'ctx, 'blk> ast::Visitor<ast::Expression> for SpecCodegen<'ctx, 'blk> {
                 self.top_mut().append_operation_with_result(op)
             }
             Number { value, .. } => {
-                let value =
-                    FeltConstAttribute::from_biguint(self.context(), value, self.prime.as_deref());
+                let value = FeltConstAttribute::from_biguint(
+                    self.context(),
+                    value.value(),
+                    self.prime.as_deref(),
+                );
                 self.top_mut()
                     .append_operation_with_result(felt::constant(location, value)?)
             }

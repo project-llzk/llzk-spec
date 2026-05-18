@@ -1,7 +1,13 @@
 //! Abstract syntax tree for `llzk-spec`.
 
+use internment::ArenaIntern;
 use num_bigint::BigUint;
 use serde::Serialize;
+
+pub mod ctx;
+pub mod type_analysis;
+
+pub use ctx::AstContext;
 
 /// Trait defining a visitor of AST entities.
 pub trait Visitor<E: Visitable> {
@@ -41,117 +47,117 @@ pub struct Span {
 
 /// Identifier with attached source span.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct Identifier {
-    pub name: String,
+pub struct Identifier<'a> {
+    pub name: Symbol<'a>,
     pub span: Span,
 }
 
-impl AsRef<str> for Identifier {
+impl AsRef<str> for Identifier<'_> {
     fn as_ref(&self) -> &str {
-        &self.name
+        self.name.as_ref()
     }
 }
 
 /// Parsed top-level document.
 #[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct Document {
-    pub items: Vec<Item>,
+pub struct Document<'a> {
+    pub items: Vec<Item<'a>>,
     pub span: Span,
 }
 
-impl Visitable for Document {}
+impl Visitable for Document<'_> {}
 
 /// Top-level declarations accepted by the language.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum Item {
-    Contract(ContractDecl),
-    Predicate(PredicateDecl),
+pub enum Item<'a> {
+    Contract(ContractDecl<'a>),
+    Predicate(PredicateDecl<'a>),
 }
 
-impl Visitable for Item {}
+impl Visitable for Item<'_> {}
 
 /// Contract declaration attached to an LLZK symbol.
 #[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct ContractDecl {
-    pub target: Identifier,
-    pub body: Block,
+pub struct ContractDecl<'a> {
+    pub target: Identifier<'a>,
+    pub body: Block<'a>,
     pub span: Span,
 }
 
-impl Visitable for ContractDecl {}
+impl Visitable for ContractDecl<'_> {}
 
 /// Predicate declaration in block or inline-expression form.
 #[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct PredicateDecl {
-    pub name: Identifier,
-    pub params: Vec<Identifier>,
-    pub body: Block,
+pub struct PredicateDecl<'a> {
+    pub name: Identifier<'a>,
+    pub params: Vec<Identifier<'a>>,
+    pub body: Block<'a>,
     pub span: Span,
 }
 
-impl Visitable for PredicateDecl {}
+impl Visitable for PredicateDecl<'_> {}
 
 /// Sequence of statements with a lexical scope.
 #[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct Block {
-    pub statements: Vec<Statement>,
+pub struct Block<'a> {
+    pub statements: Vec<Statement<'a>>,
     pub span: Span,
 }
 
-impl Visitable for Block {}
+impl Visitable for Block<'_> {}
 
-/// Statements supported by phase 1 of `llzk-spec`.
+/// Statement<'a>s supported by phase 1 of `llzk-spec`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum Statement {
+pub enum Statement<'a> {
     Scoped {
         scope: Scope,
-        statement: Box<Statement>,
+        statement: Box<Statement<'a>>,
         span: Span,
     },
-    Block(Block),
+    Block(Block<'a>),
     Require {
-        expression: Expression,
+        expression: Expression<'a>,
         span: Span,
     },
     Ensure {
-        expression: Expression,
+        expression: Expression<'a>,
         span: Span,
     },
     Let {
-        name: Identifier,
-        value: Expression,
+        name: Identifier<'a>,
+        value: Expression<'a>,
         span: Span,
     },
     Unused {
-        name: Identifier,
+        name: Identifier<'a>,
         span: Span,
     },
     Return {
-        expression: Expression,
+        expression: Expression<'a>,
         span: Span,
     },
     Increases {
-        expression: Expression,
+        expression: Expression<'a>,
         span: Span,
     },
     Decreases {
-        expression: Expression,
+        expression: Expression<'a>,
         span: Span,
     },
     Step {
-        expression: Expression,
+        expression: Expression<'a>,
         span: Span,
     },
-    Invariant(InvariantDecl),
-    Predicate(PredicateDecl),
+    Invariant(InvariantDecl<'a>),
+    Predicate(PredicateDecl<'a>),
     Empty {
         span: Span,
     },
 }
 
-impl Visitable for Statement {}
+impl Visitable for Statement<'_> {}
 
 /// Execution scope qualifier for a statement or block.
 ///
@@ -166,64 +172,64 @@ pub enum Scope {
 
 /// Loop invariant declaration attached to a loop in LLZK IR.
 #[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct InvariantDecl {
-    pub loop_name: Identifier,
-    pub bindings: Vec<Identifier>,
-    pub body: Block,
+pub struct InvariantDecl<'a> {
+    pub loop_name: Identifier<'a>,
+    pub bindings: Vec<Identifier<'a>>,
+    pub body: Block<'a>,
     pub span: Span,
 }
 
-impl Visitable for InvariantDecl {}
+impl Visitable for InvariantDecl<'_> {}
 
 /// Expression language used by contracts and predicates.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum Expression {
+pub enum Expression<'a> {
     Conditional {
-        condition: Box<Expression>,
-        then_branch: Box<Expression>,
-        else_branch: Box<Expression>,
+        condition: Box<Expression<'a>>,
+        then_branch: Box<Expression<'a>>,
+        else_branch: Box<Expression<'a>>,
         span: Span,
     },
     Binary {
         op: BinaryOp,
-        left: Box<Expression>,
-        right: Box<Expression>,
+        left: Box<Expression<'a>>,
+        right: Box<Expression<'a>>,
         span: Span,
     },
     Unary {
         op: UnaryOp,
-        expr: Box<Expression>,
+        expr: Box<Expression<'a>>,
         span: Span,
     },
     Index {
-        target: Box<Expression>,
-        index: Box<Expression>,
+        target: Box<Expression<'a>>,
+        index: Box<Expression<'a>>,
         span: Span,
     },
     Member {
-        target: Box<Expression>,
-        member: Identifier,
+        target: Box<Expression<'a>>,
+        member: Identifier<'a>,
         span: Span,
     },
     Call {
-        callee: Identifier,
-        args: Vec<Expression>,
+        callee: Identifier<'a>,
+        args: Vec<Expression<'a>>,
         span: Span,
     },
     Quantifier {
         quantifier_kind: QuantifierKind,
-        binding: Identifier,
-        domain: QuantifierDomain,
-        body: Box<Expression>,
+        binding: Identifier<'a>,
+        domain: QuantifierDomain<'a>,
+        body: Box<Expression<'a>>,
         span: Span,
     },
     Len {
-        target: Box<Expression>,
+        target: Box<Expression<'a>>,
         span: Span,
     },
     Old {
-        expression: Box<Expression>,
+        expression: Box<Expression<'a>>,
         span: Span,
     },
     Arg {
@@ -238,13 +244,13 @@ pub enum Expression {
         span: Span,
     },
     Number {
-        value: BigUint,
+        value: Literal<'a>,
         span: Span,
     },
-    Symbol(Identifier),
+    Symbol(Identifier<'a>),
 }
 
-impl Expression {
+impl Expression<'_> {
     /// Returns the source span covering the current expression node.
     pub fn span(&self) -> Span {
         match self {
@@ -266,7 +272,7 @@ impl Expression {
     }
 }
 
-impl Visitable for Expression {}
+impl Visitable for Expression<'_> {}
 
 /// Supported quantifier kinds.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -279,16 +285,16 @@ pub enum QuantifierKind {
 /// Domain over which a quantifier applies.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum QuantifierDomain {
+pub enum QuantifierDomain<'a> {
     Range {
-        start: Box<Expression>,
-        end: Box<Expression>,
+        start: Box<Expression<'a>>,
+        end: Box<Expression<'a>>,
         span: Span,
     },
-    Expr(Box<Expression>),
+    Expr(Box<Expression<'a>>),
 }
 
-impl Visitable for QuantifierDomain {}
+impl Visitable for QuantifierDomain<'_> {}
 
 /// Binary operators recognized by the grammar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -317,4 +323,88 @@ pub enum BinaryOp {
 pub enum UnaryOp {
     Not,
     Neg,
+}
+
+/// Interned symbol in the AST context.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Symbol<'a> {
+    inner: ArenaIntern<'a, str>,
+}
+
+impl<'a> Symbol<'a> {
+    pub fn value(&self) -> &'a str {
+        self.inner.into_ref()
+    }
+}
+
+impl AsRef<str> for Symbol<'_> {
+    fn as_ref(&self) -> &str {
+        self.value()
+    }
+}
+
+impl Serialize for Symbol<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.value())
+    }
+}
+
+impl PartialEq<str> for Symbol<'_> {
+    fn eq(&self, other: &str) -> bool {
+        self.value() == other
+    }
+}
+
+impl PartialEq<&str> for Symbol<'_> {
+    fn eq(&self, other: &&str) -> bool {
+        self.value() == *other
+    }
+}
+
+impl std::fmt::Display for Symbol<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.value().fmt(f)
+    }
+}
+
+impl From<Symbol<'_>> for String {
+    fn from(value: Symbol<'_>) -> Self {
+        value.value().to_owned()
+    }
+}
+
+/// Interned big integer in the AST context.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Literal<'a> {
+    inner: ArenaIntern<'a, BigUint>,
+}
+
+impl<'a> Literal<'a> {
+    pub fn value(&self) -> &'a BigUint {
+        self.inner.into_ref()
+    }
+}
+
+impl AsRef<BigUint> for Literal<'_> {
+    fn as_ref(&self) -> &BigUint {
+        self.value()
+    }
+}
+
+impl Serialize for Literal<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.value().serialize(serializer)
+    }
+}
+
+impl std::fmt::Display for Literal<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.value().fmt(f)
+    }
 }
