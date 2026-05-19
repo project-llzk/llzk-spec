@@ -21,6 +21,7 @@ internment = {version = "0.8", features = ["arena"]}
 
 [dev-dependencies]
 tempfile = "3.15"
+rstest = "0.26"
 
 [build-dependencies]
 glob = "0.3"

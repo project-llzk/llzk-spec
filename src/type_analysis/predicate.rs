@@ -1,0 +1,152 @@
+use crate::{
+    ast::{Block, Identifier, PredicateDecl, Spanned, Statement, Visitable as _, Visitor},
+    diagnostic::Diagnostic,
+    type_analysis::{
+        TypeSystem, TypingResult, block::BlockTypeChecker, ctx::TypeInferenceCtx,
+        helpers::extract_result,
+    },
+};
+
+pub(super) struct PredicateTypeChecker<'ctx, 'ast, T: TypeSystem> {
+    source_name: &'ast str,
+    ctx: &'ctx mut TypeInferenceCtx<'ast, T>,
+}
+
+impl<'ctx, 'ast, T: TypeSystem> PredicateTypeChecker<'ctx, 'ast, T> {
+    pub fn new(ctx: &'ctx mut TypeInferenceCtx<'ast, T>, source_name: &'ast str) -> Self {
+        Self { ctx, source_name }
+    }
+
+    fn ensure_no_early_return(&self, block: &Block<'_, T::Type>, diags: &mut Vec<Diagnostic>) {
+        diags.extend(
+            block
+                .statements()
+                .iter()
+                .rev()
+                // Skip the last statement since that one is allowed to be a return.
+                .skip(1)
+                .rev()
+                .filter_map(|stmt| {
+                    matches!(stmt, Statement::Return { .. }).then(|| {
+                        Diagnostic::new(
+                            self.source_name,
+                            format!("return statements must be the last statement in a predicate"),
+                            Some(stmt.span()),
+                        )
+                    })
+                }),
+        )
+    }
+
+    fn ensure_return_terminator(
+        &mut self,
+        block: &Block<'_, T::Type>,
+        diags: &mut Vec<Diagnostic>,
+    ) {
+        let Some(last) = block.statements().last() else {
+            diags.push(Diagnostic::new(
+                self.source_name,
+                format!("predicates cannot have an empty body"),
+                Some(block.span()),
+            ));
+            return;
+        };
+
+        match last {
+            Statement::Return { expression, span } => {
+                let bool_type = self.ctx.ts().bool_type();
+                if !expression.has_type(bool_type) {
+                    diags.push(Diagnostic::new(
+                        self.source_name,
+                        format!(
+                            "predicates must return a boolean expression. Got '{}'",
+                            expression.r#type()
+                        ),
+                        Some(*span),
+                    ))
+                }
+            }
+            _ => diags.push(Diagnostic::new(
+                self.source_name,
+                format!("predicates with a block body must end with a return statement"),
+                Some(block.span()),
+            )),
+        }
+    }
+
+    /// Helper function that binds the symbols in the correct scopes and pushes into a new scope.
+    fn bind_and_push(
+        &mut self,
+        decl: &PredicateDecl<'ast>,
+        diags: &mut Vec<Diagnostic>,
+    ) -> (Vec<T::Type>, T::FnType) {
+        let ins = vec![self.ctx.ts().fresh_var(); decl.params().len()];
+        let fn_type = self.ctx.ts().predicate_type(&ins);
+        let mut diags = vec![];
+
+        // Bind the predicate to the current scope.
+        extract_result(
+            self.ctx
+                .scope()
+                .top()
+                .bind_predicate(decl.name(), fn_type.clone())
+                .map_err(|err| err.into_diags(self.source_name, Some(decl.span()))),
+            &mut diags,
+        );
+        self.ctx.scope().push();
+        // Bind the formals to the new scope.
+        for (formal, r#type) in std::iter::zip(decl.params(), &ins) {
+            extract_result(
+                self.ctx
+                    .scope()
+                    .top()
+                    .bind_local(formal, r#type.clone())
+                    .map_err(|err| err.into_diags(self.source_name, Some(decl.span()))),
+                &mut diags,
+            );
+        }
+
+        (ins, fn_type)
+    }
+}
+
+impl<'ast, 'ctx, T: TypeSystem> Visitor<PredicateDecl<'ast>>
+    for PredicateTypeChecker<'ctx, 'ast, T>
+{
+    type Output = TypingResult<PredicateDecl<'ast, T::Type>>;
+
+    fn visit(&mut self, decl: &PredicateDecl<'ast>) -> Self::Output {
+        let mut diags = vec![];
+        let (ins, fn_type) = self.bind_and_push(decl, &mut diags);
+
+        let mut block_tc = BlockTypeChecker::new(self.source_name, &mut self.ctx, false, false);
+        let body = decl.body().accept(&mut block_tc)?;
+
+        self.ctx.scope().pop();
+        // Check that the last statement is a return and no other statement is.
+        self.ensure_no_early_return(&body, &mut diags);
+        self.ensure_return_terminator(&body, &mut diags);
+
+        if !diags.is_empty() {
+            return Err(diags);
+        }
+        Ok(create_decl(decl, ins, fn_type, body))
+    }
+}
+
+fn create_decl<'ast, T>(
+    decl: &PredicateDecl<'ast>,
+    ins: Vec<T>,
+    fn_type: impl Into<T>,
+    body: Block<'ast, T>,
+) -> PredicateDecl<'ast, T> {
+    let params = std::iter::zip(decl.params(), ins)
+        .map(|(ident, r#type)| ident.with_meta(r#type))
+        .collect::<Vec<_>>();
+    PredicateDecl::new(
+        decl.name().with_meta(fn_type.into()),
+        params,
+        body,
+        decl.span(),
+    )
+}

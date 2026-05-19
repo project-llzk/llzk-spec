@@ -5,7 +5,6 @@ use num_bigint::BigUint;
 use serde::Serialize;
 
 pub mod ctx;
-pub mod type_analysis;
 
 pub use ctx::AstContext;
 
@@ -74,6 +73,14 @@ impl<'a> Identifier<'a> {
             name,
             span,
             meta: (),
+        }
+    }
+
+    pub fn with_meta<M>(&self, meta: M) -> Identifier<'a, M> {
+        Identifier {
+            name: self.name,
+            span: self.span,
+            meta,
         }
     }
 }
@@ -584,7 +591,7 @@ pub enum UnaryOp {
 }
 
 /// Interned symbol in the AST context.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Symbol<'a> {
     inner: ArenaIntern<'a, str>,
 }
