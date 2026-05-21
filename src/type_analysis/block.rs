@@ -15,9 +15,9 @@ use crate::{
 pub(super) struct BlockTypeChecker<'ctx, 'ast, T: TypeSystem> {
     source_name: &'ast str,
     ctx: &'ctx mut TypeInferenceCtx<'ast, T>,
-    /// Wether invariant declarations are allowed in this context.
+    /// Whether invariant declarations are allowed in this context.
     allows_invariants: bool,
-    /// Wether scoped blocks are allowed in this context.
+    /// Whether scoped blocks are allowed in this context.
     allows_scoped: bool,
 }
 

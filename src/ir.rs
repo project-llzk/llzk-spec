@@ -12,7 +12,7 @@ use crate::{
     type_analysis::{FnTypeProperties, TypeProperties, TypeSystem},
 };
 
-/// Context supporting IR handling and generation .
+/// Context supporting IR handling and generation.
 pub struct Context {
     context: LlzkContext,
     prime: Option<String>,
