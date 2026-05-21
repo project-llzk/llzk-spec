@@ -4,4 +4,4 @@
 
 predicate foo(x) = bar(x)
 
-// CHECK: predicate symbol 'bar' not found
+// CHECK: unknown predicate 'bar'

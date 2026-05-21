@@ -4,4 +4,4 @@
 
 predicate identity(x) = y
 
-// CHECK: local symbol 'y' not found
+// CHECK: unknown local 'y'

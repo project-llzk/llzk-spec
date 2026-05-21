@@ -170,13 +170,13 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<PredicateDecl<'ast>>
         let mut block_tc = BlockTypeChecker::new(self.source_name, &mut self.ctx, false, false);
         let body = decl.body().accept(&mut block_tc)?;
 
+        // Check that the last statement is a return and no other statement is.
+        self.ensure_no_early_return(&body, &mut diags);
+        self.ensure_return_terminator(&body, &mut diags);
         // Check that all parameters have been assigned a type (i.e. they are used within the body
         // of the predicate and thus been monomorphized).
         self.ensure_full_param_monomorphization(decl, &mut diags);
         self.ctx.scope().pop();
-        // Check that the last statement is a return and no other statement is.
-        self.ensure_no_early_return(&body, &mut diags);
-        self.ensure_return_terminator(&body, &mut diags);
 
         if !diags.is_empty() {
             return Err(diags);
