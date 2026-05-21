@@ -34,6 +34,7 @@ pub trait Visitable: Sized {
 }
 
 impl<V: Visitable> Visitable for Box<V> {}
+impl<V: Visitable> Visitable for Vec<V> {}
 
 /// Source location of an AST node.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Default)]

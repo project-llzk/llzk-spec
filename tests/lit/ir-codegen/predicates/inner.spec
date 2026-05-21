@@ -1,15 +1,14 @@
 // REQUIRES: llzk-spec
 // RUN: %llzk_spec --spec %s --llzk %S/../../Inputs/valid-unlabeled-for.llzk --emit=ir  | FileCheck %s
 // END.
+// Emitting IR for predicates within predicates is not implemented yet.
+// XFAIL: *
 
-// 
+// Different arity that inner foo for catching errors more easily
 predicate foo(x, y) = !x || y
 
-predicate not(x) = !x
+predicate bar(x) {
+  predicate foo(y) = !y
 
-// CHECK-LABEL: module attributes {llzk.lang} {
-// CHECK-NEXT:    function.def @always() -> i1 {
-// CHECK-NEXT:      %[[VAL_0:[0-9a-zA-Z_\.]+]] = arith.constant true
-// CHECK-NEXT:      function.return %[[VAL_0]] : i1
-// CHECK-NEXT:    }
-// CHECK-NEXT:  }
+  return foo(!x);
+}

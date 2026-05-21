@@ -166,14 +166,10 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<PredicateDecl<'ast>>
     fn visit(&mut self, decl: &PredicateDecl<'ast>) -> Self::Output {
         let mut diags = vec![];
         let ins = self.bind_and_push(decl, &mut diags);
-        eprintln!("Before checking body:");
-        self.ctx.scope().dump();
 
         let mut block_tc = BlockTypeChecker::new(self.source_name, &mut self.ctx, false, false);
         let body = decl.body().accept(&mut block_tc)?;
 
-        eprintln!("After checking body:");
-        self.ctx.scope().dump();
         // Check that all parameters have been assigned a type (i.e. they are used within the body
         // of the predicate and thus been monomorphized).
         self.ensure_full_param_monomorphization(decl, &mut diags);
