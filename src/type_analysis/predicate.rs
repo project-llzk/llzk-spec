@@ -55,16 +55,15 @@ impl<'ctx, 'ast, T: TypeSystem> PredicateTypeChecker<'ctx, 'ast, T> {
         match last {
             Statement::Return { expression, span } => {
                 let bool_type = self.ctx.ts().bool_type();
-                if !expression.has_type(bool_type) {
-                    diags.push(Diagnostic::new(
-                        self.source_name,
-                        format!(
-                            "predicates must return a boolean expression. Got '{}'",
-                            expression.r#type()
-                        ),
-                        Some(*span),
-                    ))
-                }
+                self.ctx.add_constraint(bool_type, expression.r#type());
+                extract_result(
+                    self.ctx.unify().map_err(|err| {
+                        err.into_iter()
+                            .flat_map(|err| err.into_diags(self.source_name, Some(*span)))
+                            .collect()
+                    }),
+                    diags,
+                );
             }
             _ => diags.push(Diagnostic::new(
                 self.source_name,
@@ -79,7 +78,7 @@ impl<'ctx, 'ast, T: TypeSystem> PredicateTypeChecker<'ctx, 'ast, T> {
         &mut self,
         decl: &PredicateDecl<'ast>,
         diags: &mut Vec<Diagnostic>,
-    ) -> (Vec<T::Type>, T::FnType) {
+    ) -> Vec<T::Type> {
         let ins = vec![self.ctx.ts().fresh_var(); decl.params().len()];
         let fn_type = self.ctx.ts().predicate_type(&ins);
         let mut diags = vec![];
@@ -89,7 +88,7 @@ impl<'ctx, 'ast, T: TypeSystem> PredicateTypeChecker<'ctx, 'ast, T> {
             self.ctx
                 .scope()
                 .top()
-                .bind_predicate(decl.name(), fn_type.clone())
+                .bind_predicate(decl.name(), fn_type)
                 .map_err(|err| err.into_diags(self.source_name, Some(decl.span()))),
             &mut diags,
         );
@@ -106,7 +105,7 @@ impl<'ctx, 'ast, T: TypeSystem> PredicateTypeChecker<'ctx, 'ast, T> {
             );
         }
 
-        (ins, fn_type)
+        ins
     }
 }
 
@@ -117,7 +116,7 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<PredicateDecl<'ast>>
 
     fn visit(&mut self, decl: &PredicateDecl<'ast>) -> Self::Output {
         let mut diags = vec![];
-        let (ins, fn_type) = self.bind_and_push(decl, &mut diags);
+        let ins = self.bind_and_push(decl, &mut diags);
 
         let mut block_tc = BlockTypeChecker::new(self.source_name, &mut self.ctx, false, false);
         let body = decl.body().accept(&mut block_tc)?;
@@ -130,7 +129,17 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<PredicateDecl<'ast>>
         if !diags.is_empty() {
             return Err(diags);
         }
-        Ok(create_decl(decl, ins, fn_type, body))
+        Ok(create_decl(
+            decl,
+            ins,
+            // Fetch the prediate's type again to get the update version post-inference.
+            self.ctx
+                .scope()
+                .find_predicate(decl.name())
+                .unwrap()
+                .clone(),
+            body,
+        ))
     }
 }
 

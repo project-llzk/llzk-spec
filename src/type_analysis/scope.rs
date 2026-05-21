@@ -4,7 +4,9 @@ use std::collections::HashMap;
 
 use crate::{
     ast::{Identifier, Symbol},
-    type_analysis::error::TypeAnalysisError,
+    type_analysis::{
+        FnTypeProperties, TypeProperties, TypeSystem, ctx::Subst, error::TypeAnalysisError,
+    },
 };
 
 pub(super) struct ScopeStack<'ast, L, F> {
@@ -54,6 +56,62 @@ impl<'ast, L, F> ScopeStack<'ast, L, F> {
     /// Returns an iterator of the scopes in stack order top to bottom.
     fn ordered_scopes(&self) -> impl Iterator<Item = &Scope<'ast, L, F>> {
         self.scopes.iter().rev().chain([&self.root])
+    }
+
+    /// Returns an iterator of mutable references to the scopes in stack order top to bottom.
+    fn ordered_scopes_mut(&mut self) -> impl Iterator<Item = &mut Scope<'ast, L, F>> {
+        self.scopes.iter_mut().rev().chain([&mut self.root])
+    }
+
+    /// Propagates resolved types across type variables binded in the scope.
+    pub fn propagate<T>(&mut self, subst: &Subst<T>, ts: &mut T)
+    where
+        T: TypeSystem<Type = L, FnType = F>,
+        L: TypeProperties + Clone,
+        F: FnTypeProperties<Type = L>,
+    {
+        self.all_local_types()
+            .filter(|l| l.is_var_type())
+            .for_each(|l| {
+                let id = l.var_id().unwrap();
+                if let Some(r) = subst.get(&id) {
+                    *l = r.clone();
+                }
+            });
+        self.all_predicate_types().for_each(|f| {
+            let mut ins = f.inputs().to_vec();
+            let mut outs = f.inputs().to_vec();
+            for i in ins.iter_mut() {
+                let _ = propagate_type::<T, L>(i, subst);
+            }
+            for o in outs.iter_mut() {
+                let _ = propagate_type::<T, L>(o, subst);
+            }
+            *f = ts.func_type(&ins, &outs);
+        });
+
+        fn propagate_type<T, L>(l: &mut L, subst: &Subst<T>) -> Option<()>
+        where
+            T: TypeSystem<Type = L>,
+            L: TypeProperties + Clone,
+        {
+            let id = l.var_id()?;
+            let r = subst.get(&id)?;
+            *l = r.clone();
+            Some(())
+        }
+    }
+
+    /// Returns an iterator of mutable references to all the type bindings of locals.
+    fn all_local_types(&mut self) -> impl Iterator<Item = &mut L> {
+        self.ordered_scopes_mut()
+            .flat_map(|scope| scope.locals.values_mut())
+    }
+
+    /// Returns an iterator of mutable references to all the type bindings of predicates.
+    fn all_predicate_types(&mut self) -> impl Iterator<Item = &mut F> {
+        self.ordered_scopes_mut()
+            .flat_map(|scope| scope.predicates.values_mut())
     }
 }
 

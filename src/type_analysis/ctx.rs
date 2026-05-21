@@ -7,7 +7,7 @@ use crate::{
     },
 };
 
-type Subst<T> =
+pub(super) type Subst<T> =
     HashMap<<<T as TypeSystem>::Type as TypeProperties>::VarId, <T as TypeSystem>::Type>;
 
 pub(super) struct TypeInferenceCtx<'ast, T: TypeSystem> {
@@ -49,6 +49,7 @@ impl<'ast, T: TypeSystem> TypeInferenceCtx<'ast, T> {
             self.unify_pair(&c.lhs, &c.rhs, &mut errs);
         }
 
+        self.scope.propagate(&self.subst, &mut self.ts);
         if !errs.is_empty() {
             return Err(errs);
         }
@@ -96,11 +97,11 @@ impl<'ast, T: TypeSystem> TypeInferenceCtx<'ast, T> {
         }
 
         for (lhs, rhs) in std::iter::zip(lhs.inputs(), rhs.inputs()) {
-            self.unify_pair(lhs, rhs, errs);
+            self.unify_pair(&lhs, &rhs, errs);
         }
 
         for (lhs, rhs) in std::iter::zip(lhs.outputs(), rhs.outputs()) {
-            self.unify_pair(lhs, rhs, errs);
+            self.unify_pair(&lhs, &rhs, errs);
         }
     }
 
@@ -181,7 +182,10 @@ mod tests {
     use rstest::{fixture, rstest};
 
     use super::*;
-    use crate::type_analysis::tests::*;
+    use crate::{
+        ast::{AstContext, Identifier, Span},
+        type_analysis::tests::*,
+    };
 
     type Ctx<'ast> = TypeInferenceCtx<'ast, MockTypeSystem>;
 
@@ -299,6 +303,51 @@ mod tests {
         ctx.add_constraint(lhs.clone(), xxx.clone());
         ctx.add_constraint(xxx.clone(), rhs.clone());
         ctx.unify().unwrap();
+        assert_eq!(ctx.resolve(lhs), rhs);
+    }
+
+    #[test]
+    fn propagate_1() {
+        let ast_ctx = AstContext::new();
+        let name = Identifier::new(ast_ctx.symbol("x"), Span::default());
+        let mut ctx = ctx();
+
+        let lhs = ctx.ts().fresh_var();
+        let rhs = ctx.ts().bool_type();
+
+        ctx.scope().push(); // Push because the root scope does not allow locals.
+        ctx.scope().top().bind_local(&name, lhs.clone()).unwrap();
+        // Before unification the local binds to the var type.
+        assert_eq!(*ctx.scope().find_local(&name).unwrap(), lhs);
+
+        ctx.add_constraint(lhs.clone(), rhs.clone());
+        ctx.unify().unwrap();
+
+        // After unification we should have propagated the substitution to the binding.
+        assert_eq!(*ctx.scope().find_local(&name).unwrap(), rhs);
+        assert_eq!(ctx.resolve(lhs), rhs);
+    }
+
+    #[test]
+    fn propagate_2() {
+        let ast_ctx = AstContext::new();
+        let name = Identifier::new(ast_ctx.symbol("x"), Span::default());
+        let mut ctx = ctx();
+
+        let lhs = ctx.ts().fresh_var();
+        let other = ctx.ts().fresh_var();
+        let rhs = ctx.ts().bool_type();
+
+        ctx.scope().push(); // Push because the root scope does not allow locals.
+        ctx.scope().top().bind_local(&name, other.clone()).unwrap();
+        // Before unification the local binds to the var type.
+        assert_eq!(*ctx.scope().find_local(&name).unwrap(), other);
+
+        ctx.add_constraint(lhs.clone(), rhs.clone());
+        ctx.unify().unwrap();
+
+        // After unification, we haven't seen the other var yet so we don't replace it.
+        assert_eq!(*ctx.scope().find_local(&name).unwrap(), other);
         assert_eq!(ctx.resolve(lhs), rhs);
     }
 }

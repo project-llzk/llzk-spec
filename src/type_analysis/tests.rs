@@ -106,12 +106,12 @@ impl std::fmt::Display for MockFnType {
 impl FnTypeProperties for MockFnType {
     type Type = MockType;
 
-    fn inputs(&self) -> &[MockType] {
-        &self.ins
+    fn inputs(&self) -> Vec<MockType> {
+        self.ins.clone()
     }
 
-    fn outputs(&self) -> &[MockType] {
-        &self.outs
+    fn outputs(&self) -> Vec<MockType> {
+        self.outs.clone()
     }
 }
 

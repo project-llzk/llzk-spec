@@ -4,7 +4,7 @@ use crate::{
     type_analysis::{TypeSystem, TypingResult},
 };
 
-impl<'ast, T: Clone + PartialEq + Eq> Expression<'ast, T> {
+impl<'ast, T: Clone + PartialEq> Expression<'ast, T> {
     /// Returns the type of the expression.
     pub fn r#type(&self) -> T {
         self.meta().clone()

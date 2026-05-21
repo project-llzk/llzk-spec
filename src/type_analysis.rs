@@ -75,10 +75,9 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Item<'ast>> for TypeChecker<'ctx, 'ast, 
 ///
 /// Helps decouple the inference engine from MLIR types, simplifying testing.
 pub trait TypeSystem {
-    type Type: Clone + PartialEq + Eq + std::fmt::Display + TypeProperties<FnType = Self::FnType>;
+    type Type: Clone + PartialEq + std::fmt::Display + TypeProperties<FnType = Self::FnType>;
     type FnType: Clone
         + PartialEq
-        + Eq
         + std::fmt::Display
         + Into<Self::Type>
         + FnTypeProperties<Type = Self::Type>;
@@ -105,9 +104,9 @@ pub trait TypeSystem {
 /// Trait for obtaining information about function types.
 pub trait FnTypeProperties {
     type Type;
-    fn inputs(&self) -> &[Self::Type];
+    fn inputs(&self) -> Vec<Self::Type>;
 
-    fn outputs(&self) -> &[Self::Type];
+    fn outputs(&self) -> Vec<Self::Type>;
 }
 
 /// Trait for obtaining information about types.
