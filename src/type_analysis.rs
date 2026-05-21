@@ -1,9 +1,5 @@
 //! Type analysis of the AST.
 
-// Shut up rust_analyzer for now.
-#![allow(unused)]
-#![allow(dead_code)]
-
 use std::{collections::HashMap, marker::PhantomData};
 
 use llzk::dialect::bool;

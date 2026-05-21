@@ -293,7 +293,7 @@ mod tests {
         ctx.add_constraint(lhs.clone(), rhs1);
         ctx.unify().expect("this one should not fail");
         ctx.add_constraint(lhs, rhs2);
-        ctx.unify().map_err(|errs| {
+        let _ = ctx.unify().map_err(|errs| {
             for err in errs {
                 panic!("{err}");
             }
