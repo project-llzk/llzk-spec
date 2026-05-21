@@ -55,7 +55,9 @@ impl<'ctx, 'ast, T: TypeSystem> BlockTypeChecker<'ctx, 'ast, T> {
         extract_result(
             self.ctx.unify().map_err(|errs| {
                 errs.into_iter()
-                    .flat_map(|err| err.into_diags(self.source_name, Some(span)))
+                    .flat_map(|err| {
+                        err.into_diags(self.source_name, Some(span), format!("in binary op '{op}'"))
+                    })
                     .collect()
             }),
             diags,
@@ -76,7 +78,9 @@ impl<'ctx, 'ast, T: TypeSystem> BlockTypeChecker<'ctx, 'ast, T> {
         extract_result(
             self.ctx.unify().map_err(|errs| {
                 errs.into_iter()
-                    .flat_map(|err| err.into_diags(self.source_name, Some(span)))
+                    .flat_map(|err| {
+                        err.into_diags(self.source_name, Some(span), format!("in unary op '{op}'"))
+                    })
                     .collect()
             }),
             diags,
@@ -142,7 +146,9 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Statement<'ast>> for BlockTypeChecker<'c
                     .scope()
                     .top()
                     .bind_local(name, value.r#type())
-                    .map_err(|err| err.into_diags(self.source_name, Some(*span)))?;
+                    .map_err(|err| {
+                        err.into_diags(self.source_name, Some(*span), "in let statement")
+                    })?;
                 Ok(Statement::Let {
                     name: name.with_meta(value.r#type()),
                     value,
@@ -221,7 +227,13 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Expression<'ast>> for BlockTypeChecker<'
                 extract_result(
                     self.ctx.unify().map_err(|err| {
                         err.into_iter()
-                            .flat_map(|err| err.into_diags(self.source_name, Some(*span)))
+                            .flat_map(|err| {
+                                err.into_diags(
+                                    self.source_name,
+                                    Some(*span),
+                                    "on conditional expression",
+                                )
+                            })
                             .collect()
                     }),
                     &mut diags,
@@ -300,7 +312,9 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Expression<'ast>> for BlockTypeChecker<'
                     .ctx
                     .scope()
                     .find_predicate(callee)
-                    .map_err(|err| err.into_diags(self.source_name, Some(*span)))?
+                    .map_err(|err| {
+                        err.into_diags(self.source_name, Some(*span), "on call expression")
+                    })?
                     .clone();
                 // Add constraints between the types of the expressions and the declared type of
                 // the function type.
@@ -331,7 +345,13 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Expression<'ast>> for BlockTypeChecker<'
                 extract_result(
                     self.ctx.unify().map_err(|err| {
                         err.into_iter()
-                            .flat_map(|err| err.into_diags(self.source_name, Some(*span)))
+                            .flat_map(|err| {
+                                err.into_diags(
+                                    self.source_name,
+                                    Some(*span),
+                                    format!("on callsite to '{}'", callee.value()),
+                                )
+                            })
                             .collect()
                     }),
                     &mut diags,
@@ -368,12 +388,13 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Expression<'ast>> for BlockTypeChecker<'
                 meta: self.ctx.ts().felt_type(),
             }),
             Expression::Symbol(ident) => {
-                let t = self
-                    .ctx
-                    .scope()
-                    .find_local(ident)
-                    .cloned()
-                    .map_err(|err| err.into_diags(self.source_name, Some(ident.span())))?;
+                let t = self.ctx.scope().find_local(ident).cloned().map_err(|err| {
+                    err.into_diags(
+                        self.source_name,
+                        Some(ident.span()),
+                        format!("on symbol '{}'", ident.value()),
+                    )
+                })?;
 
                 Ok(Expression::Symbol(ident.with_meta(self.ctx.resolve(t))))
             }

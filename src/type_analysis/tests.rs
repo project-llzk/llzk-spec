@@ -113,6 +113,11 @@ impl FnTypeProperties for MockFnType {
     fn outputs(&self) -> Vec<MockType> {
         self.outs.clone()
     }
+
+    fn contains_type_vars(&self) -> bool {
+        self.ins.iter().any(|i| i.contains_type_vars())
+            || self.outs.iter().any(|o| o.contains_type_vars())
+    }
 }
 
 impl TypeProperties for MockType {

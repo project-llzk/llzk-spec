@@ -3,10 +3,6 @@
 //! Only emitting IR to a separate file is currently supported. In the future we want to support
 //! emitting IR inlined with an existing LLZK module.
 
-// TODO: This lowering may act as semantic analysis for the spec language, which means that
-// we'll have to collect errors in a nicer way that just giving up with `Result::Err`. Also we may
-// want to wire MLIR diagnostics to our own s.t. they show up to the user with the same formatting.
-
 use std::collections::HashMap;
 
 use llzk::{
@@ -22,8 +18,19 @@ use melior::{
 use crate::{
     ast::{self, Spanned, Visitable},
     diagnostic::CompileError,
-    ir::Context,
+    ir::{Context, MlirTypeSystem},
+    type_analysis::TypeChecker,
 };
+
+// Typed AST entities
+type TypedDocument<'ast, 'ctx> = ast::Document<'ast, Type<'ctx>>;
+type TypedItem<'ast, 'ctx> = ast::Item<'ast, Type<'ctx>>;
+type TypedContractDecl<'ast, 'ctx> = ast::ContractDecl<'ast, Type<'ctx>>;
+type TypedPredicateDecl<'ast, 'ctx> = ast::PredicateDecl<'ast, Type<'ctx>>;
+type TypedBlock<'ast, 'ctx> = ast::Block<'ast, Type<'ctx>>;
+type TypedStatement<'ast, 'ctx> = ast::Statement<'ast, Type<'ctx>>;
+type TypedExpression<'ast, 'ctx> = ast::Expression<'ast, Type<'ctx>>;
+type TypedIdentifier<'ast, 'ctx> = ast::Identifier<'ast, Type<'ctx>>;
 
 /// Generates IR for the given [`Document`] on a fresh module.
 pub fn emit_on_empty_module<'ctx>(
@@ -31,20 +38,21 @@ pub fn emit_on_empty_module<'ctx>(
     filename: &str,
     document: &ast::Document,
 ) -> Result<Module<'ctx>, CompileError> {
+    let typed_document = TypeChecker::check(MlirTypeSystem::new(ctx), filename, document)?;
     let module = ctx.fresh_module(filename, document.span());
-    SpecCodegen::new(ctx, &module, filename.to_owned()).emit_ir(document)?;
+    SpecCodegen::new(ctx, &module, filename.to_owned()).emit_ir(&typed_document)?;
     Ok(module)
 }
 
 /// Code generator of specifications.
-struct SpecCodegen<'ctx, 'blk> {
+struct SpecCodegen<'ast, 'ctx, 'blk> {
     ctx: &'ctx Context,
-    scope: Vec<Scope<'ctx, 'blk>>,
+    scope: Vec<Scope<'ast, 'ctx, 'blk>>,
     filename: String,
     builder: OpBuilder<'ctx>,
 }
 
-impl<'ctx, 'blk> SpecCodegen<'ctx, 'blk>
+impl<'ctx, 'blk> SpecCodegen<'_, 'ctx, 'blk>
 where
     'blk: 'ctx,
 {
@@ -59,7 +67,7 @@ where
     }
 }
 
-impl<'ctx, 'blk> SpecCodegen<'ctx, 'blk> {
+impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
     fn builder(&self) -> &OpBuilder<'ctx> {
         &self.builder
     }
@@ -68,11 +76,11 @@ impl<'ctx, 'blk> SpecCodegen<'ctx, 'blk> {
         &self.ctx.context
     }
 
-    fn emit_ir(mut self, document: &ast::Document) -> Result<(), CompileError> {
+    fn emit_ir(mut self, document: &TypedDocument<'ast, 'ctx>) -> Result<(), CompileError> {
         document.accept(&mut self)
     }
 
-    fn top_mut(&mut self) -> &mut Scope<'ctx, 'blk> {
+    fn top_mut(&mut self) -> &mut Scope<'ast, 'ctx, 'blk> {
         self.scope.last_mut().unwrap()
     }
 
@@ -84,17 +92,16 @@ impl<'ctx, 'blk> SpecCodegen<'ctx, 'blk> {
         self.scope.pop();
     }
 
+    /// Creates a `function.def` operation.
     fn create_func_def_op(
         &self,
         span: ast::Span,
-        name: &ast::Identifier,
-        inputs: &[Type<'ctx>],
-        outputs: &[Type<'ctx>],
+        name: &TypedIdentifier<'ast, 'ctx>,
     ) -> Result<FuncDefOp<'ctx>, CompileError> {
         let op = function::def(
             self.location(span),
             name.as_ref(),
-            self.func_type(inputs, outputs),
+            (*name.meta()).try_into()?,
             &[],
             None,
         )?;
@@ -122,7 +129,7 @@ impl<'ctx, 'blk> SpecCodegen<'ctx, 'blk> {
     /// otherwise.
     fn find_in_scope<R>(
         &self,
-        find_cb: impl FnMut(&Scope<'ctx, 'blk>) -> Option<R>,
+        find_cb: impl FnMut(&Scope<'ast, 'ctx, 'blk>) -> Option<R>,
         on_error: impl FnOnce() -> CompileError,
     ) -> Result<R, CompileError> {
         self.scope
@@ -132,33 +139,36 @@ impl<'ctx, 'blk> SpecCodegen<'ctx, 'blk> {
             .ok_or_else(on_error)
     }
 
-    fn find_symbol(&self, symbol: &ast::Identifier) -> Result<Value<'ctx, 'blk>, CompileError> {
+    fn find_symbol(
+        &self,
+        name: &TypedIdentifier<'ast, 'ctx>,
+    ) -> Result<Value<'ctx, 'blk>, CompileError> {
         self.find_in_scope(
-            |scope| scope.locals.get(symbol.as_ref()).copied(),
-            || CompileError::Ir(format!("local symbol '{}' not found", symbol.value())),
+            |scope| scope.locals.get(&name.symbol()).copied(),
+            || CompileError::Ir(format!("local symbol '{}' not found", name.value())),
         )
     }
 
     fn find_predicate(
         &self,
-        symbol: &ast::Identifier,
+        name: &TypedIdentifier<'ast, 'ctx>,
     ) -> Result<FuncDefOpRef<'ctx, 'blk>, CompileError> {
         self.find_in_scope(
-            |scope| scope.predicates.get(symbol.as_ref()).copied(),
-            || CompileError::Ir(format!("predicate symbol '{}' not found", symbol.value())),
+            |scope| scope.predicates.get(&name.symbol()).copied(),
+            || CompileError::Ir(format!("predicate symbol '{}' not found", name.value())),
         )
     }
 }
 
-fn accept_in_new_scope<'ctx, 'blk, V, R>(
+fn accept_in_new_scope<'ast, 'ctx, 'blk, V, R>(
     region: &Region<'ctx>,
-    scope: &mut SpecCodegen<'ctx, 'blk>,
+    scope: &mut SpecCodegen<'ast, 'ctx, 'blk>,
     target: &V,
-    tail_cb: impl FnOnce(R, &mut SpecCodegen<'ctx, 'blk>) -> Result<R, CompileError>,
+    tail_cb: impl FnOnce(R, &mut SpecCodegen<'ast, 'ctx, 'blk>) -> Result<R, CompileError>,
 ) -> Result<R, CompileError>
 where
     V: Visitable,
-    SpecCodegen<'ctx, 'blk>: ast::Visitor<V, Output = Result<R, CompileError>>,
+    SpecCodegen<'ast, 'ctx, 'blk>: ast::Visitor<V, Output = Result<R, CompileError>>,
 {
     let block_ref = region.append_block(melior::ir::Block::new(&[]));
     scope.push(block_ref);
@@ -168,10 +178,10 @@ where
     Ok(result)
 }
 
-impl ast::Visitor<ast::Document<'_>> for SpecCodegen<'_, '_> {
+impl<'ast, 'ctx> ast::Visitor<TypedDocument<'ast, 'ctx>> for SpecCodegen<'ast, 'ctx, '_> {
     type Output = Result<(), CompileError>;
 
-    fn visit(&mut self, document: &ast::Document) -> Self::Output {
+    fn visit(&mut self, document: &TypedDocument<'ast, 'ctx>) -> Self::Output {
         document
             .items()
             .iter()
@@ -179,49 +189,65 @@ impl ast::Visitor<ast::Document<'_>> for SpecCodegen<'_, '_> {
     }
 }
 
-impl ast::Visitor<ast::Item<'_>> for SpecCodegen<'_, '_> {
+impl<'ast, 'ctx> ast::Visitor<TypedItem<'ast, 'ctx>> for SpecCodegen<'ast, 'ctx, '_> {
     type Output = Result<(), CompileError>;
 
-    fn visit(&mut self, item: &ast::Item) -> Self::Output {
+    fn visit(&mut self, item: &TypedItem<'ast, 'ctx>) -> Self::Output {
         match item {
-            ast::Item::Contract(_) => todo!("lowering contracts it not currently supported"),
-            ast::Item::Predicate(decl) => decl.accept(self),
+            TypedItem::Contract(_) => todo!("lowering contracts it not currently supported"),
+            TypedItem::Predicate(decl) => decl.accept(self),
         }
     }
 }
 
-impl ast::Visitor<ast::PredicateDecl<'_>> for SpecCodegen<'_, '_> {
-    type Output = Result<(), CompileError>;
+/// Returns the inputs of a function type in a `Vec`.
+fn func_type_inputs<'ctx>(func_type: FunctionType<'ctx>) -> Result<Vec<Type<'ctx>>, melior::Error> {
+    (0..(func_type.input_count()))
+        .map(|n| func_type.input(n))
+        .collect()
+}
 
-    fn visit(&mut self, decl: &ast::PredicateDecl) -> Self::Output {
-        let bool_type = self.bool_type();
-        let param_types = vec![bool_type; decl.params().len()];
-        // Create the FuncDefOp and insert it into the current block.
-        let func_op =
-            self.create_func_def_op(decl.span(), &decl.name(), &param_types, &[bool_type])?;
-        // Insert the function into the predicates' bindings of the current scope.
-        let func_op = self.top_mut().bind_predicate(func_op)?;
-        // Push a new scope using the first block of the function
+impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
+    /// Pushes a block where to emit the body of a predicate.
+    fn bind_and_push_predicate_block(
+        &mut self,
+        decl: &TypedPredicateDecl<'ast, 'ctx>,
+    ) -> Result<(), CompileError> {
+        let param_types = func_type_inputs((*decl.name().meta()).try_into()?)?;
         let param_locations = decl.params().iter().map(|i| self.location(i.span()));
+
         let block_args = std::iter::zip(param_types, param_locations).collect::<Vec<_>>();
+
+        // Insert the function into the predicates' bindings of the current scope.
+        let func_op = self.create_func_def_op(decl.span(), decl.name())?;
+        let func_op = self.top_mut().bind_predicate(decl.name(), func_op)?;
+
         let block = func_op
             .region(0)?
             .append_block(::melior::ir::Block::new(&block_args));
+
         self.push(block);
+
         // Bind the formals to their block arguments.
         decl.params()
             .iter()
             .enumerate()
-            .map(
-                |(n, formal)| -> Result<(ast::Symbol, Value), CompileError> {
-                    let value = Value::from(block.argument(n)?);
-                    Ok((formal.symbol(), value))
-                },
-            )
+            .map(|(n, formal)| -> Result<(_, Value), CompileError> {
+                let value = Value::from(block.argument(n)?);
+                Ok((formal, value))
+            })
             .try_for_each(|r| {
                 let (name, value) = r?;
-                self.top_mut().bind_local(name.into(), value)
-            })?;
+                self.top_mut().bind_local(name, value)
+            })
+    }
+}
+
+impl<'ast, 'ctx> ast::Visitor<TypedPredicateDecl<'ast, 'ctx>> for SpecCodegen<'ast, 'ctx, '_> {
+    type Output = Result<(), CompileError>;
+
+    fn visit(&mut self, decl: &TypedPredicateDecl<'ast, 'ctx>) -> Self::Output {
+        self.bind_and_push_predicate_block(decl)?;
         // Lower the body of the predicate.
         decl.body().accept(self)?;
         self.pop();
@@ -229,10 +255,10 @@ impl ast::Visitor<ast::PredicateDecl<'_>> for SpecCodegen<'_, '_> {
     }
 }
 
-impl ast::Visitor<ast::Block<'_>> for SpecCodegen<'_, '_> {
+impl<'ast, 'ctx> ast::Visitor<TypedBlock<'ast, 'ctx>> for SpecCodegen<'ast, 'ctx, '_> {
     type Output = Result<(), CompileError>;
 
-    fn visit(&mut self, block: &ast::Block) -> Self::Output {
+    fn visit(&mut self, block: &TypedBlock<'ast, 'ctx>) -> Self::Output {
         block
             .statements()
             .iter()
@@ -240,10 +266,10 @@ impl ast::Visitor<ast::Block<'_>> for SpecCodegen<'_, '_> {
     }
 }
 
-impl ast::Visitor<ast::Statement<'_>> for SpecCodegen<'_, '_> {
+impl<'ast, 'ctx> ast::Visitor<TypedStatement<'ast, 'ctx>> for SpecCodegen<'ast, 'ctx, '_> {
     type Output = Result<(), CompileError>;
 
-    fn visit(&mut self, stmt: &ast::Statement) -> Self::Output {
+    fn visit(&mut self, stmt: &TypedStatement<'ast, 'ctx>) -> Self::Output {
         use ast::Statement::*;
         match stmt {
             Scoped { .. } => todo!("scoped statement is not supported yet"),
@@ -273,7 +299,7 @@ impl ast::Visitor<ast::Statement<'_>> for SpecCodegen<'_, '_> {
             // last op in the function's body).
             Let { name, value, .. } => {
                 let value = value.accept(self)?;
-                self.top_mut().bind_local(name.value().into(), value)
+                self.top_mut().bind_local(name, value)
             }
             Unused { .. } => todo!("unused statement is not supported yet"),
             Return { expression, span } => {
@@ -293,10 +319,10 @@ impl ast::Visitor<ast::Statement<'_>> for SpecCodegen<'_, '_> {
     }
 }
 
-impl<'ctx, 'blk> ast::Visitor<ast::Expression<'_>> for SpecCodegen<'ctx, 'blk> {
+impl<'ast, 'ctx, 'blk> ast::Visitor<TypedExpression<'ast, 'ctx>> for SpecCodegen<'ast, 'ctx, 'blk> {
     type Output = Result<Value<'ctx, 'blk>, CompileError>;
 
-    fn visit(&mut self, expr: &ast::Expression) -> Self::Output {
+    fn visit(&mut self, expr: &TypedExpression<'ast, 'ctx>) -> Self::Output {
         use ast::BinaryOp::*;
         use ast::Expression::*;
         use ast::UnaryOp::*;
@@ -314,7 +340,7 @@ impl<'ctx, 'blk> ast::Visitor<ast::Expression<'_>> for SpecCodegen<'ctx, 'blk> {
                     &then_region,
                     self,
                     then_branch,
-                    |result, scope: &mut SpecCodegen<'ctx, 'blk>| {
+                    |result, scope: &mut SpecCodegen<'ast, 'ctx, 'blk>| {
                         let op = scf::r#yield(&[result], location);
                         scope.top_mut().append_operation(op);
                         Ok(result)
@@ -326,7 +352,7 @@ impl<'ctx, 'blk> ast::Visitor<ast::Expression<'_>> for SpecCodegen<'ctx, 'blk> {
                     &else_region,
                     self,
                     else_branch,
-                    |result, scope: &mut SpecCodegen<'ctx, 'blk>| {
+                    |result, scope: &mut SpecCodegen<'ast, 'ctx, 'blk>| {
                         let op = scf::r#yield(&[result], location);
                         scope.top_mut().append_operation(op);
                         Ok(result)
@@ -426,16 +452,16 @@ impl<'ctx, 'blk> ast::Visitor<ast::Expression<'_>> for SpecCodegen<'ctx, 'blk> {
 }
 
 /// Entry in the scope stack.
-struct Scope<'ctx, 'blk> {
+struct Scope<'ast, 'ctx, 'blk> {
     // Current insertion block.
     block: BlockRef<'ctx, 'blk>,
     // Binds names to predicates.
-    predicates: HashMap<String, FuncDefOpRef<'ctx, 'blk>>,
+    predicates: HashMap<ast::Symbol<'ast>, FuncDefOpRef<'ctx, 'blk>>,
     // Binds local names to SSA values.
-    locals: HashMap<String, Value<'ctx, 'blk>>,
+    locals: HashMap<ast::Symbol<'ast>, Value<'ctx, 'blk>>,
 }
 
-impl<'ctx, 'blk> Scope<'ctx, 'blk> {
+impl<'ast, 'ctx, 'blk> Scope<'ast, 'ctx, 'blk> {
     fn root<'m>(module: &'blk Module<'ctx>) -> Self
     where
         'blk: 'ctx,
@@ -453,26 +479,32 @@ impl<'ctx, 'blk> Scope<'ctx, 'blk> {
 
     fn bind_predicate(
         &mut self,
+        name: &TypedIdentifier<'ast, 'ctx>,
         func_op: FuncDefOp<'ctx>,
     ) -> Result<FuncDefOpRef<'ctx, 'blk>, CompileError> {
-        let name = func_op
-            .attribute("sym_name")
-            .expect("'function.def' has 'sym_name' attribute");
-        let name = StringAttribute::try_from(name)?;
-        let name = name.value();
-        if self.predicates.contains_key(name) {
-            return Err(CompileError::Ir(format!("duplicate predicate '{name}'")));
+        if self.predicates.contains_key(&name.symbol()) {
+            return Err(CompileError::Ir(format!(
+                "duplicate predicate '{}'",
+                name.value()
+            )));
         }
         let op_ref: FuncDefOpRef<'ctx, 'blk> = self.append_operation(func_op).try_into()?;
-        self.predicates.insert(name.to_owned(), op_ref);
+        self.predicates.insert(name.symbol(), op_ref);
         Ok(op_ref)
     }
 
-    fn bind_local(&mut self, name: String, value: Value<'ctx, 'blk>) -> Result<(), CompileError> {
-        if self.locals.contains_key(&name) {
-            return Err(CompileError::Ir(format!("duplicate local '{name}'")));
+    fn bind_local(
+        &mut self,
+        name: &TypedIdentifier<'ast, 'ctx>,
+        value: Value<'ctx, 'blk>,
+    ) -> Result<(), CompileError> {
+        if self.locals.contains_key(&name.symbol()) {
+            return Err(CompileError::Ir(format!(
+                "duplicate local '{}'",
+                name.value()
+            )));
         }
-        self.locals.insert(name, value);
+        self.locals.insert(name.symbol(), value);
         Ok(())
     }
 

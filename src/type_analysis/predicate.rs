@@ -2,7 +2,7 @@ use crate::{
     ast::{Block, Identifier, PredicateDecl, Spanned, Statement, Visitable as _, Visitor},
     diagnostic::Diagnostic,
     type_analysis::{
-        TypeSystem, TypingResult, block::BlockTypeChecker, ctx::TypeInferenceCtx,
+        TypeProperties, TypeSystem, TypingResult, block::BlockTypeChecker, ctx::TypeInferenceCtx,
         helpers::extract_result,
     },
 };
@@ -59,7 +59,9 @@ impl<'ctx, 'ast, T: TypeSystem> PredicateTypeChecker<'ctx, 'ast, T> {
                 extract_result(
                     self.ctx.unify().map_err(|err| {
                         err.into_iter()
-                            .flat_map(|err| err.into_diags(self.source_name, Some(*span)))
+                            .flat_map(|err| {
+                                err.into_diags(self.source_name, Some(*span), "on return statement")
+                            })
                             .collect()
                     }),
                     diags,
@@ -79,7 +81,9 @@ impl<'ctx, 'ast, T: TypeSystem> PredicateTypeChecker<'ctx, 'ast, T> {
         decl: &PredicateDecl<'ast>,
         diags: &mut Vec<Diagnostic>,
     ) -> Vec<T::Type> {
-        let ins = vec![self.ctx.ts().fresh_var(); decl.params().len()];
+        let ins = Vec::from_iter(
+            std::iter::repeat_with(|| self.ctx.ts().fresh_var()).take(decl.params().len()),
+        );
         let fn_type = self.ctx.ts().predicate_type(&ins);
         let mut diags = vec![];
 
@@ -89,7 +93,13 @@ impl<'ctx, 'ast, T: TypeSystem> PredicateTypeChecker<'ctx, 'ast, T> {
                 .scope()
                 .top()
                 .bind_predicate(decl.name(), fn_type)
-                .map_err(|err| err.into_diags(self.source_name, Some(decl.span()))),
+                .map_err(|err| {
+                    err.into_diags(
+                        self.source_name,
+                        Some(decl.span()),
+                        format!("on declaration of predicate '{}'", decl.name().value()),
+                    )
+                }),
             &mut diags,
         );
         self.ctx.scope().push();
@@ -100,12 +110,51 @@ impl<'ctx, 'ast, T: TypeSystem> PredicateTypeChecker<'ctx, 'ast, T> {
                     .scope()
                     .top()
                     .bind_local(formal, r#type.clone())
-                    .map_err(|err| err.into_diags(self.source_name, Some(decl.span()))),
+                    .map_err(|err| {
+                        err.into_diags(
+                            self.source_name,
+                            Some(decl.span()),
+                            format!(
+                                "on parameter '{}' of predicate '{}'",
+                                formal.value(),
+                                decl.name().value()
+                            ),
+                        )
+                    }),
                 &mut diags,
             );
         }
 
         ins
+    }
+
+    /// Ensures that all parameters of the predicate have been assigned a concrete type.
+    ///
+    /// # Panics
+    ///
+    /// Call this method BEFORE popping the scope used for checking the body. If done after, the
+    /// parameters will disappear and this method will panic.
+    fn ensure_full_param_monomorphization(
+        &mut self,
+        decl: &PredicateDecl<'ast>,
+        diags: &mut Vec<Diagnostic>,
+    ) {
+        for name in decl.params() {
+            /// The param MUST exist. If it doesn't is a bug in our part because we are probably
+            /// calling this method wrong.
+            let binding = self.ctx.scope().find_local(name).unwrap();
+            if binding.is_var_type() {
+                diags.push(Diagnostic::new(
+                    self.source_name,
+                    format!(
+                        "parameter '{}' in predicate '{}' has an ambigous type",
+                        name.value(),
+                        decl.name().value()
+                    ),
+                    Some(name.span()),
+                ));
+            }
+        }
     }
 }
 
@@ -117,10 +166,17 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<PredicateDecl<'ast>>
     fn visit(&mut self, decl: &PredicateDecl<'ast>) -> Self::Output {
         let mut diags = vec![];
         let ins = self.bind_and_push(decl, &mut diags);
+        eprintln!("Before checking body:");
+        self.ctx.scope().dump();
 
         let mut block_tc = BlockTypeChecker::new(self.source_name, &mut self.ctx, false, false);
         let body = decl.body().accept(&mut block_tc)?;
 
+        eprintln!("After checking body:");
+        self.ctx.scope().dump();
+        // Check that all parameters have been assigned a type (i.e. they are used within the body
+        // of the predicate and thus been monomorphized).
+        self.ensure_full_param_monomorphization(decl, &mut diags);
         self.ctx.scope().pop();
         // Check that the last statement is a return and no other statement is.
         self.ensure_no_early_return(&body, &mut diags);

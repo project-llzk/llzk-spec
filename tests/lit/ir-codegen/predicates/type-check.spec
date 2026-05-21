@@ -2,10 +2,8 @@
 // RUN: %llzk_spec --spec %s --llzk %S/../../Inputs/valid-unlabeled-for.llzk --emit=ir  | FileCheck %s
 // END.
 
-// Extra comparison since predicates must return a boolean.
-predicate neg(x) = (-x) != 0
+predicate felts_and_bool(f1, f2, b1) = ((f1 + f2) == 0) && b1
 
-predicate not(x) = !x
 
 // CHECK-LABEL: module attributes {llzk.lang} {
 // CHECK-NEXT:    function.def @always() -> i1 {

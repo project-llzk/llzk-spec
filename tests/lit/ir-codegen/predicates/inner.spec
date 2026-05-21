@@ -2,8 +2,8 @@
 // RUN: %llzk_spec --spec %s --llzk %S/../../Inputs/valid-unlabeled-for.llzk --emit=ir  | FileCheck %s
 // END.
 
-// Extra comparison since predicates must return a boolean.
-predicate neg(x) = (-x) != 0
+// 
+predicate foo(x, y) = !x || y
 
 predicate not(x) = !x
 

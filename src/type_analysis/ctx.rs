@@ -18,6 +18,15 @@ pub(super) struct TypeInferenceCtx<'ast, T: TypeSystem> {
 }
 
 impl<'ast, T: TypeSystem> TypeInferenceCtx<'ast, T> {
+    pub fn new(ts: T) -> Self {
+        Self {
+            scope: ScopeStack::new(),
+            constraints: Default::default(),
+            ts,
+            subst: Default::default(),
+        }
+    }
+
     pub fn ts(&mut self) -> &mut T {
         &mut self.ts
     }
@@ -63,13 +72,18 @@ impl<'ast, T: TypeSystem> TypeInferenceCtx<'ast, T> {
         let lhs = Self::apply(lhs, &self.subst, &mut self.ts);
         let rhs = Self::apply(rhs, &self.subst, &mut self.ts);
 
-        if lhs.is_var_type() {
-            self.unify_type_var(lhs.var_id().unwrap(), rhs, errs);
+        // Check for equality again after application
+        if lhs == rhs {
             return;
         }
 
-        if rhs.is_var_type() {
-            self.unify_type_var(rhs.var_id().unwrap(), lhs, errs);
+        if let Some(id) = lhs.var_id() {
+            self.unify_type_var(id, rhs, errs);
+            return;
+        }
+
+        if let Some(id) = rhs.var_id() {
+            self.unify_type_var(id, lhs, errs);
             return;
         }
 

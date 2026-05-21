@@ -82,7 +82,10 @@ pub fn run(args: Args) -> Result<(), CompileError> {
         };
         let module = emit_on_empty_module(&ctx, &spec_name, &document)?;
         if !module.as_operation().verify() {
-            return Err(CompileError::Ir("spec module failed to verify".to_owned()));
+            return Err(CompileError::Ir(format!(
+                "spec module failed to verify\nModule:\n{}",
+                module.as_operation()
+            )));
         }
         dump::write_ir(&module, args.emit_dest.as_ref(), args.emit_format)?;
     }

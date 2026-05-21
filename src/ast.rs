@@ -65,6 +65,10 @@ impl<'a, M> Identifier<'a, M> {
     pub fn symbol(&self) -> Symbol<'a> {
         self.name
     }
+
+    pub fn meta(&self) -> &M {
+        &self.meta
+    }
 }
 
 impl<'a> Identifier<'a> {
@@ -582,12 +586,51 @@ pub enum BinaryOp {
     Pow,
 }
 
+impl std::fmt::Display for BinaryOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                BinaryOp::Or => "||",
+                BinaryOp::And => "&&",
+                BinaryOp::Eq => "==",
+                BinaryOp::Ne => "!=",
+                BinaryOp::Lt => "<",
+                BinaryOp::Le => "<=",
+                BinaryOp::Gt => ">",
+                BinaryOp::Ge => ">=",
+                BinaryOp::Add => "+",
+                BinaryOp::Sub => "-",
+                BinaryOp::Mul => "*",
+                BinaryOp::Div => "/",
+                BinaryOp::Mod => "%",
+                BinaryOp::BitAnd => "&",
+                BinaryOp::Pow => "**",
+            }
+        )
+    }
+}
+
 /// Unary operators recognized by the grammar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum UnaryOp {
     Not,
     Neg,
+}
+
+impl std::fmt::Display for UnaryOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                UnaryOp::Not => "!",
+                UnaryOp::Neg => "-",
+            }
+        )
+    }
 }
 
 /// Interned symbol in the AST context.

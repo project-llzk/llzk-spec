@@ -14,7 +14,11 @@ pub(super) struct ScopeStack<'ast, L, F> {
     scopes: Vec<Scope<'ast, L, F>>,
 }
 
-impl<'ast, L, F> ScopeStack<'ast, L, F> {
+impl<'ast, L, F> ScopeStack<'ast, L, F>
+where
+    L: std::fmt::Display,
+    F: std::fmt::Display,
+{
     pub fn new() -> Self {
         Self {
             root: Scope::new(true),
@@ -78,22 +82,25 @@ impl<'ast, L, F> ScopeStack<'ast, L, F> {
                     *l = r.clone();
                 }
             });
-        self.all_predicate_types().for_each(|f| {
-            let mut ins = f.inputs().to_vec();
-            let mut outs = f.inputs().to_vec();
-            for i in ins.iter_mut() {
-                let _ = propagate_type::<T, L>(i, subst);
-            }
-            for o in outs.iter_mut() {
-                let _ = propagate_type::<T, L>(o, subst);
-            }
-            *f = ts.func_type(&ins, &outs);
-        });
+        self.all_predicate_types()
+            .filter(|f| f.contains_type_vars())
+            .for_each(|f| {
+                let mut ins = f.inputs().to_vec();
+                let mut outs = f.outputs().to_vec();
+                for (n, i) in ins.iter_mut().enumerate() {
+                    let _ = propagate_type::<T, L>(i, subst);
+                }
+                for (n, o) in outs.iter_mut().enumerate() {
+                    let _ = propagate_type::<T, L>(o, subst);
+                }
+                let r = ts.func_type(&ins, &outs);
+                *f = r;
+            });
 
         fn propagate_type<T, L>(l: &mut L, subst: &Subst<T>) -> Option<()>
         where
             T: TypeSystem<Type = L>,
-            L: TypeProperties + Clone,
+            L: TypeProperties + Clone + std::fmt::Display,
         {
             let id = l.var_id()?;
             let r = subst.get(&id)?;
@@ -113,6 +120,16 @@ impl<'ast, L, F> ScopeStack<'ast, L, F> {
         self.ordered_scopes_mut()
             .flat_map(|scope| scope.predicates.values_mut())
     }
+
+    /// Dumps the scope stack to stderr.
+    pub(super) fn dump(&self) {
+        let scope_count = self.scopes.len() + 1;
+        self.ordered_scopes().enumerate().for_each(|(n, s)| {
+            let n = scope_count - n;
+            eprintln!("Scope #{n}");
+            s.dump();
+        });
+    }
 }
 
 /// Entry in the scope stack.
@@ -125,7 +142,11 @@ pub(super) struct Scope<'ast, L, F> {
     local_limit: bool,
 }
 
-impl<'ast, L, F> Scope<'ast, L, F> {
+impl<'ast, L, F> Scope<'ast, L, F>
+where
+    L: std::fmt::Display,
+    F: std::fmt::Display,
+{
     fn new(local_limit: bool) -> Self {
         Self {
             predicates: Default::default(),
@@ -154,5 +175,17 @@ impl<'ast, L, F> Scope<'ast, L, F> {
         }
         self.locals.insert(name.symbol(), l);
         Ok(())
+    }
+
+    /// Dumps the scope to stderr.
+    fn dump(&self) {
+        eprintln!("  Predicates:");
+        self.predicates.iter().for_each(|(symbol, binding)| {
+            eprintln!("    {}: {binding}", symbol.value());
+        });
+        eprintln!("  Locals:");
+        self.locals.iter().for_each(|(symbol, binding)| {
+            eprintln!("    {}: {binding}", symbol.value());
+        });
     }
 }

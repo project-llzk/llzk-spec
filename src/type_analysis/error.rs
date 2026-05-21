@@ -19,7 +19,16 @@ pub enum TypeAnalysisError {
 }
 
 impl TypeAnalysisError {
-    pub fn into_diags(self, source_name: &str, span: Option<Span>) -> Vec<Diagnostic> {
-        vec![Diagnostic::new(source_name, format!("{self}"), span)]
+    pub fn into_diags(
+        self,
+        source_name: &str,
+        span: Option<Span>,
+        context: impl std::fmt::Display,
+    ) -> Vec<Diagnostic> {
+        vec![Diagnostic::new(
+            source_name,
+            format!("{context}: {self}"),
+            span,
+        )]
     }
 }

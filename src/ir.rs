@@ -128,7 +128,7 @@ impl<'ctx> TypeSystem for MlirTypeSystem<'ctx> {
     fn fresh_var(&mut self) -> Self::Type {
         let id = self.next_var;
         self.next_var += 1;
-        TVarType::new(self.ctx.context(), StringRef::new(&format!("τ{id}"))).into()
+        TVarType::new(self.ctx.context(), StringRef::new(&format!("T{id}"))).into()
     }
 }
 
@@ -173,6 +173,13 @@ impl<'ctx> FnTypeProperties for WrapFunctionType<'ctx> {
         (0..self.0.result_count())
             .map(|n| self.0.result(n).unwrap())
             .collect()
+    }
+
+    fn contains_type_vars(&self) -> bool {
+        let mut inputs = (0..self.0.input_count()).map(|n| self.0.input(n).unwrap());
+        let mut outputs = (0..self.0.result_count()).map(|n| self.0.result(n).unwrap());
+
+        inputs.any(|i| i.contains_type_vars()) || outputs.any(|o| o.contains_type_vars())
     }
 }
 

@@ -13,7 +13,7 @@ use crate::{
         BinaryOp, Block, ContractDecl, Document, Expression, Identifier, Item, PredicateDecl, Span,
         Spanned as _, Statement, Symbol, UnaryOp, Visitable, Visitor,
     },
-    diagnostic::Diagnostic,
+    diagnostic::{CompileError, Diagnostic},
     type_analysis::{
         contract::ContractTypeChecker,
         ctx::TypeInferenceCtx,
@@ -33,11 +33,34 @@ mod scope;
 
 type TypingResult<T> = Result<T, Vec<Diagnostic>>;
 
-struct TypeChecker<'ctx, 'ast, T: TypeSystem> {
+pub struct TypeChecker<'ctx, 'ast, T: TypeSystem> {
     ctx: TypeInferenceCtx<'ast, T>,
     source_name: &'ast str,
     /// I don't want to get rid of 'ctx yet just in case.
     _marker: PhantomData<&'ctx ()>,
+}
+
+impl<'ast, T: TypeSystem> TypeChecker<'_, 'ast, T> {
+    /// Creates a new type checker.
+    fn new(ts: T, source_name: &'ast str) -> Self {
+        Self {
+            ctx: TypeInferenceCtx::new(ts),
+            source_name,
+            _marker: PhantomData,
+        }
+    }
+
+    /// Typechecks the document using the provided type system.
+    pub fn check(
+        ts: T,
+        source_name: &'ast str,
+        document: &Document<'ast>,
+    ) -> Result<Document<'ast, T::Type>, CompileError> {
+        let mut checker = Self::new(ts, source_name);
+        document
+            .accept(&mut checker)
+            .map_err(|diags| CompileError::Diagnostics(diags.into()))
+    }
 }
 
 impl<'ast, 'ctx, T: TypeSystem> Visitor<Document<'ast>> for TypeChecker<'ctx, 'ast, T> {
@@ -107,6 +130,8 @@ pub trait FnTypeProperties {
     fn inputs(&self) -> Vec<Self::Type>;
 
     fn outputs(&self) -> Vec<Self::Type>;
+
+    fn contains_type_vars(&self) -> bool;
 }
 
 /// Trait for obtaining information about types.
@@ -121,6 +146,11 @@ pub trait TypeProperties {
     fn is_func_type(&self) -> bool;
 
     fn to_func_type(&self) -> Option<Self::FnType>;
+
+    fn contains_type_vars(&self) -> bool {
+        self.is_var_type()
+            || (self.is_func_type() && self.to_func_type().is_some_and(|f| f.contains_type_vars()))
+    }
 }
 
 #[cfg(test)]
