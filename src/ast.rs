@@ -36,7 +36,7 @@ pub trait Visitable: Sized {
 impl<V: Visitable> Visitable for Box<V> {}
 
 /// Source location of an AST node.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Default)]
 pub struct Span {
     pub start: usize,
     pub end: usize,
