@@ -1,6 +1,6 @@
 //! Command-line interface for the `llzk-spec` compiler.
 
-use crate::ast::Document;
+use crate::ast::{AstContext, Document};
 use crate::diagnostic::CompileError;
 use crate::ir::load_ir;
 use crate::parser::parse_document;
@@ -42,7 +42,9 @@ pub fn run(args: Args) -> Result<(), CompileError> {
     let spec_name = args.spec_file.display().to_string();
     let ir_name = args.llzk_ir_file.display().to_string();
 
-    let document = parse_document(&spec_name, &spec_source).map_err(CompileError::Syntax)?;
+    let ast_ctx = AstContext::new();
+    let document =
+        parse_document(&ast_ctx, &spec_name, &spec_source).map_err(CompileError::Syntax)?;
     let ir = load_ir(&ir_name, &ir_source)?;
     verify_document(&document, &ir, &spec_name)
         .map_err(|diagnostics| CompileError::Diagnostics(diagnostics.into()))?;

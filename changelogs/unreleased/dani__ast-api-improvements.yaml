@@ -1,0 +1,2 @@
+changed:
+  - Stabilized the API of the `ast` module a little with getter methods and the `Visitor`, `Visitable`, and `Spanned` traits.
