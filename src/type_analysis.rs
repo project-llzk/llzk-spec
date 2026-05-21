@@ -33,20 +33,17 @@ mod scope;
 
 type TypingResult<T> = Result<T, Vec<Diagnostic>>;
 
-pub struct TypeChecker<'ctx, 'ast, T: TypeSystem> {
+pub struct TypeChecker<'ast, T: TypeSystem> {
     ctx: TypeInferenceCtx<'ast, T>,
     source_name: &'ast str,
-    /// I don't want to get rid of 'ctx yet just in case.
-    _marker: PhantomData<&'ctx ()>,
 }
 
-impl<'ast, T: TypeSystem> TypeChecker<'_, 'ast, T> {
+impl<'ast, T: TypeSystem> TypeChecker<'ast, T> {
     /// Creates a new type checker.
     fn new(ts: T, source_name: &'ast str) -> Self {
         Self {
             ctx: TypeInferenceCtx::new(ts),
             source_name,
-            _marker: PhantomData,
         }
     }
 
@@ -63,7 +60,7 @@ impl<'ast, T: TypeSystem> TypeChecker<'_, 'ast, T> {
     }
 }
 
-impl<'ast, 'ctx, T: TypeSystem> Visitor<Document<'ast>> for TypeChecker<'ctx, 'ast, T> {
+impl<'ast, T: TypeSystem> Visitor<Document<'ast>> for TypeChecker<'ast, T> {
     type Output = TypingResult<Document<'ast, T::Type>>;
 
     fn visit(&mut self, document: &Document<'ast>) -> Self::Output {
@@ -73,7 +70,7 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Document<'ast>> for TypeChecker<'ctx, 'a
     }
 }
 
-impl<'ast, 'ctx, T: TypeSystem> Visitor<Item<'ast>> for TypeChecker<'ctx, 'ast, T> {
+impl<'ast, T: TypeSystem> Visitor<Item<'ast>> for TypeChecker<'ast, T> {
     type Output = TypingResult<Item<'ast, T::Type>>;
 
     fn visit(&mut self, entity: &Item<'ast>) -> Self::Output {
