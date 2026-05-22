@@ -57,7 +57,7 @@ impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
     /// the first scope that can accept `function.def` operations.
     ///
     /// Since predicates can be defined locally inside contracts or other predicates the top of the
-    /// stack will be a block whose parent operation is not the kind expected by `function.def`
+    /// stack may be a block whose parent operation is not the kind expected by `function.def`
     /// operations.
     fn bind_predicate(
         &mut self,
