@@ -300,7 +300,9 @@ impl<'ast, 'ctx, 'blk> ast::Visitor<TypedExpression<'ast, 'ctx>> for SpecCodegen
             Quantifier { .. } => todo!("quantifier expression is not supported yet"),
             Len { .. } => todo!("len expression is not supported yet"),
             Old { .. } => todo!("old expression is not supported yet"),
-            Arg { .. } => todo!("arg expression is not supported yet"),
+            Arg { index, span, .. } => self.scope.find_parameter(index).copied().map_err(|err| {
+                err.into_compile_error(&self.filename, Some(*span), format!("on argument #{index}"))
+            }),
             Nondet { meta, .. } => self
                 .top_mut()
                 .append_operation_with_result(nondet(location, *meta)),
