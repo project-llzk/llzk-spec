@@ -34,7 +34,7 @@ impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
 
         // Insert the function into the predicates' bindings of the current scope.
         let func_op = self.create_func_def_op(decl.span(), decl.name())?;
-        let func_op = self.top_mut().bind_predicate(decl.name(), func_op)?;
+        let func_op = self.bind_predicate(decl.name(), func_op)?;
 
         let block = func_op.region(0)?.append_block(Block::new(&block_args));
 
@@ -51,6 +51,30 @@ impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
                 let (name, value) = r?;
                 self.top_mut().bind_local(name, value)
             })
+    }
+
+    /// Binds a predicate into the top of the stack. However, the actual operation is inserted on
+    /// the first scope that can accept `function.def` operations.
+    ///
+    /// Since predicates can be defined locally inside contracts or other predicates the top of the
+    /// stack will be a block whose parent operation is not the kind expected by `function.def`
+    /// operations.
+    fn bind_predicate(
+        &mut self,
+        name: &TypedIdentifier<'ast, 'ctx>,
+        func_op: FuncDefOp<'ctx>,
+    ) -> Result<FuncDefOpRef<'ctx, 'blk>, CompileError> {
+        // Append the operation into the correct scope.
+        let scope = self
+            .scope
+            .iter_mut()
+            .rev()
+            .find(|scope| scope.tag().is_some_and(ScopeTag::accepts_function_def_ops))
+            .unwrap();
+        let op_ref = scope.append_with_symbol_uniquing(func_op);
+        // But bind it in the top of the stack.
+        self.top_mut().bind_predicate(name, op_ref.try_into()?)?;
+        Ok(op_ref.try_into()?)
     }
 
     pub fn builder(&self) -> &OpBuilder<'ctx> {

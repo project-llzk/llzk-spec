@@ -8,7 +8,7 @@ repository = "https://github.com/project-llzk/llzk-spec"
 
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
-llzk = { git = "https://github.com/project-llzk/llzk-rs", rev = "4001b6891e3e7934816e0afe2cf307aa08dce0f9", features = ["bigint"] }
+llzk = { git = "https://github.com/project-llzk/llzk-rs", features = ["bigint"] }
 melior = "0.25"
 mlir-sys = "0.5"
 pest = "2.7"

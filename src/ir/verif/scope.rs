@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use llzk::prelude::{FuncDefOp, FuncDefOpRef, OperationLike as _};
+use llzk::prelude::{FuncDefOpRef, OperationLike as _};
 use melior::ir::{BlockLike as _, BlockRef, Module, Operation, OperationRef, Value};
 
 use crate::{ast::Symbol, diagnostic::CompileError, ir::verif::TypedIdentifier};
@@ -14,6 +14,13 @@ pub enum ScopeTag {
     Root,
     /// Tag for predicate scopes.
     Predicate,
+}
+
+impl ScopeTag {
+    /// Returns wether the tagged scope can append `function.def` operations.
+    pub fn accepts_function_def_ops(self) -> bool {
+        matches!(self, ScopeTag::Root)
+    }
 }
 
 /// Entry in the scope stack.
@@ -57,17 +64,16 @@ impl<'ast, 'ctx, 'blk> Scope<'ast, 'ctx, 'blk> {
     pub fn bind_predicate(
         &mut self,
         name: &TypedIdentifier<'ast, 'ctx>,
-        func_op: FuncDefOp<'ctx>,
-    ) -> Result<FuncDefOpRef<'ctx, 'blk>, CompileError> {
+        func_op: FuncDefOpRef<'ctx, 'blk>,
+    ) -> Result<(), CompileError> {
         if self.predicates.contains_key(&name.symbol()) {
             return Err(CompileError::Ir(format!(
                 "duplicate predicate '{}'",
                 name.value()
             )));
         }
-        let op_ref: FuncDefOpRef<'ctx, 'blk> = self.append_operation(func_op).try_into()?;
-        self.predicates.insert(name.symbol(), op_ref);
-        Ok(op_ref)
+        self.predicates.insert(name.symbol(), func_op);
+        Ok(())
     }
 
     pub fn bind_local(
@@ -87,6 +93,26 @@ impl<'ast, 'ctx, 'blk> Scope<'ast, 'ctx, 'blk> {
 
     pub fn append_operation(&mut self, op: impl Into<Operation<'ctx>>) -> OperationRef<'ctx, 'blk> {
         self.block.append_operation(op.into())
+    }
+
+    /// Appends the operation into the scope using MLIR's SymbolTable API to ensure that the
+    /// operation has an unique name after insertion.
+    ///
+    /// The parent op of the block must implement the `SymbolTable` interface and the to be
+    /// inserted operation must implement the `Symbol` interface.
+    ///
+    /// # Panics
+    ///
+    /// If the block does not have a parent operation (aka is free floating).
+    pub fn append_with_symbol_uniquing(
+        &mut self,
+        op: impl Into<Operation<'ctx>>,
+    ) -> OperationRef<'ctx, 'blk> {
+        let parent_op = self
+            .block
+            .parent_operation()
+            .expect("scope's block has a parent operation");
+        llzk::symbol_table::insert(&parent_op, op.into())
     }
 
     pub fn append_operation_with_result(

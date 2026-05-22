@@ -207,7 +207,7 @@ impl<'ast, 'ctx> ast::Visitor<TypedStatement<'ast, 'ctx>> for SpecCodegen<'ast, 
                 ScopeTag::Predicate => stmt_not_allowed!("invariant", "predicates"),
                 _ => todo!("invariant statement is not supported yet"),
             },
-            Predicate(_) => todo!("predicate decl statement is not supported yet"),
+            Predicate(decl) => decl.accept(self),
             Empty { .. } => Ok(()),
         }
     }
