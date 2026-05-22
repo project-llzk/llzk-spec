@@ -18,7 +18,10 @@ use crate::{
     diagnostic::CompileError,
     ir::{
         Context, MlirTypeSystem,
-        verif::{helpers::accept_in_new_scope, scope::Scope},
+        verif::{
+            helpers::accept_in_new_scope,
+            scope::{Scope, ScopeTag},
+        },
     },
     type_analysis::TypeChecker,
 };
@@ -136,13 +139,26 @@ impl<'ast, 'ctx> ast::Visitor<TypedBlock<'ast, 'ctx>> for SpecCodegen<'ast, 'ctx
     }
 }
 
+macro_rules! stmt_not_allowed {
+    ($stmt:literal, $scope:literal) => {
+        unreachable!(concat!(
+            $stmt,
+            " statements are not allowed inside ",
+            $scope
+        ))
+    };
+}
+
 impl<'ast, 'ctx> ast::Visitor<TypedStatement<'ast, 'ctx>> for SpecCodegen<'ast, 'ctx, '_> {
     type Output = Result<(), CompileError>;
 
     fn visit(&mut self, stmt: &TypedStatement<'ast, 'ctx>) -> Self::Output {
         use ast::Statement::*;
         match stmt {
-            Scoped { .. } => todo!("scoped statement is not supported yet"),
+            Scoped { .. } => match self.closest_tag() {
+                ScopeTag::Predicate => stmt_not_allowed!("scoped", "predicates"),
+                _ => todo!("scoped statement is not supported yet"),
+            },
             Block(block) => {
                 // Wrap the body of the block to ensure that SSA values don't leak in case of bugs
                 // in the scope logic.
@@ -152,13 +168,22 @@ impl<'ast, 'ctx> ast::Visitor<TypedStatement<'ast, 'ctx>> for SpecCodegen<'ast, 
                 self.top_mut().append_operation(op);
                 Ok(())
             }
-            Require { .. } => todo!("require statement is not supported yet"),
-            Ensure { .. } => todo!("ensure statement is not supported yet"),
+            Require { .. } => match self.closest_tag() {
+                ScopeTag::Predicate => stmt_not_allowed!("require", "predicates"),
+                _ => todo!("require statement is not supported yet"),
+            },
+            Ensure { .. } => match self.closest_tag() {
+                ScopeTag::Predicate => stmt_not_allowed!("ensure", "predicates"),
+                _ => todo!("ensure statement is not supported yet"),
+            },
             Let { name, value, .. } => {
                 let value = value.accept(self)?;
                 self.top_mut().bind_local(name, value)
             }
-            Unused { .. } => todo!("unused statement is not supported yet"),
+            Unused { .. } => match self.closest_tag() {
+                ScopeTag::Predicate => stmt_not_allowed!("unused", "predicates"),
+                _ => todo!("unused statement is not supported yet"),
+            },
             Return { expression, span } => {
                 let value = expression.accept(self)?;
                 let location = self.location(*span);
@@ -166,10 +191,22 @@ impl<'ast, 'ctx> ast::Visitor<TypedStatement<'ast, 'ctx>> for SpecCodegen<'ast, 
                     .append_operation(function::r#return(location, &[value]));
                 Ok(())
             }
-            Increases { .. } => todo!("increases statement is not supported yet"),
-            Decreases { .. } => todo!("decreases statement is not supported yet"),
-            Step { .. } => todo!("step statement is not supported yet"),
-            Invariant(_) => todo!("invariant decl statement is not supported yet"),
+            Increases { .. } => match self.closest_tag() {
+                ScopeTag::Predicate => stmt_not_allowed!("increases", "predicates"),
+                _ => todo!("increases statement is not supported yet"),
+            },
+            Decreases { .. } => match self.closest_tag() {
+                ScopeTag::Predicate => stmt_not_allowed!("decreases", "predicates"),
+                _ => todo!("decreases statement is not supported yet"),
+            },
+            Step { .. } => match self.closest_tag() {
+                ScopeTag::Predicate => stmt_not_allowed!("step", "predicates"),
+                _ => todo!("step statement is not supported yet"),
+            },
+            Invariant(_) => match self.closest_tag() {
+                ScopeTag::Predicate => stmt_not_allowed!("invariant", "predicates"),
+                _ => todo!("invariant statement is not supported yet"),
+            },
             Predicate(_) => todo!("predicate decl statement is not supported yet"),
             Empty { .. } => Ok(()),
         }

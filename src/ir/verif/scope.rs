@@ -7,14 +7,25 @@ use melior::ir::{BlockLike as _, BlockRef, Module, Operation, OperationRef, Valu
 
 use crate::{ast::Symbol, diagnostic::CompileError, ir::verif::TypedIdentifier};
 
+/// Optional tag for annotating scopes.
+#[derive(Debug, Copy, Clone)]
+pub enum ScopeTag {
+    /// Tag for the root scope.
+    Root,
+    /// Tag for predicate scopes.
+    Predicate,
+}
+
 /// Entry in the scope stack.
 pub(super) struct Scope<'ast, 'ctx, 'blk> {
-    // Current insertion block.
+    /// Current insertion block.
     block: BlockRef<'ctx, 'blk>,
-    // Binds names to predicates.
+    /// Binds names to predicates.
     predicates: HashMap<Symbol<'ast>, FuncDefOpRef<'ctx, 'blk>>,
-    // Binds local names to SSA values.
+    /// Binds local names to SSA values.
     locals: HashMap<Symbol<'ast>, Value<'ctx, 'blk>>,
+    /// Optional tag.
+    tag: Option<ScopeTag>,
 }
 
 impl<'ast, 'ctx, 'blk> Scope<'ast, 'ctx, 'blk> {
@@ -22,7 +33,7 @@ impl<'ast, 'ctx, 'blk> Scope<'ast, 'ctx, 'blk> {
     where
         'blk: 'ctx,
     {
-        Self::new(module.body())
+        Self::new_with_tag(module.body(), ScopeTag::Root)
     }
 
     pub fn new(block: BlockRef<'ctx, 'blk>) -> Self {
@@ -30,6 +41,16 @@ impl<'ast, 'ctx, 'blk> Scope<'ast, 'ctx, 'blk> {
             block,
             predicates: Default::default(),
             locals: Default::default(),
+            tag: None,
+        }
+    }
+
+    pub fn new_with_tag(block: BlockRef<'ctx, 'blk>, tag: ScopeTag) -> Self {
+        Self {
+            block,
+            predicates: Default::default(),
+            locals: Default::default(),
+            tag: Some(tag),
         }
     }
 
@@ -88,5 +109,9 @@ impl<'ast, 'ctx, 'blk> Scope<'ast, 'ctx, 'blk> {
 
     pub fn locals(&self) -> &HashMap<Symbol<'ast>, Value<'ctx, 'blk>> {
         &self.locals
+    }
+
+    pub fn tag(&self) -> Option<ScopeTag> {
+        self.tag
     }
 }

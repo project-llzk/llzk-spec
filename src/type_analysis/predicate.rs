@@ -7,16 +7,20 @@ use crate::{
     },
 };
 
+/// Handles type checking predicate declarations.
 pub(super) struct PredicateTypeChecker<'ctx, 'ast, T: TypeSystem> {
     source_name: &'ast str,
     ctx: &'ctx mut TypeInferenceCtx<'ast, T>,
 }
 
 impl<'ctx, 'ast, T: TypeSystem> PredicateTypeChecker<'ctx, 'ast, T> {
+    /// Creates a new predicate type checker.
     pub fn new(ctx: &'ctx mut TypeInferenceCtx<'ast, T>, source_name: &'ast str) -> Self {
         Self { ctx, source_name }
     }
 
+    /// Ensures that, with the exception of the last statement, the body of the predicate does not
+    /// contain `return` statements.
     fn ensure_no_early_return(&self, block: &Block<'_, T::Type>, diags: &mut Vec<Diagnostic>) {
         diags.extend(
             block
@@ -37,6 +41,12 @@ impl<'ctx, 'ast, T: TypeSystem> PredicateTypeChecker<'ctx, 'ast, T> {
         )
     }
 
+    /// Ensures that the body of the predicate ends with a return statement and that the returned
+    /// expression has a boolean type.
+    ///
+    /// The type check is performed via a type constraint so this method should be called before
+    /// [`Self::ensure_full_param_monomorphization`] to allow propagating types. Otherwise
+    /// predicates like `predicate foo(x) = x` will fails to type check.
     fn ensure_return_terminator(
         &mut self,
         block: &Block<'_, T::Type>,
@@ -100,6 +110,7 @@ impl<'ctx, 'ast, T: TypeSystem> PredicateTypeChecker<'ctx, 'ast, T> {
                 }),
             diags,
         );
+        // Push a local limit scope to avoid inner predicates accessing outer locals.
         self.ctx.scope().push_local_limit();
         // Bind the formals to the new scope.
         for (formal, r#type) in std::iter::zip(decl.params(), &ins) {

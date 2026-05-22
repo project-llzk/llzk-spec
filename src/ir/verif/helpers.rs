@@ -16,7 +16,9 @@ use melior::ir::{
 use crate::{
     ast::{Span, Spanned as _, Visitable, Visitor},
     diagnostic::CompileError,
-    ir::verif::{Scope, SpecCodegen, TypedExpression, TypedIdentifier, TypedPredicateDecl},
+    ir::verif::{
+        Scope, SpecCodegen, TypedExpression, TypedIdentifier, TypedPredicateDecl, scope::ScopeTag,
+    },
 };
 
 impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
@@ -36,7 +38,7 @@ impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
 
         let block = func_op.region(0)?.append_block(Block::new(&block_args));
 
-        self.push(block);
+        self.push_tagged(block, ScopeTag::Predicate);
 
         // Bind the formals to their block arguments.
         decl.params()
@@ -67,8 +69,28 @@ impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
         self.scope.push(Scope::new(block))
     }
 
+    pub fn push_tagged(&mut self, block: BlockRef<'ctx, 'blk>, tag: ScopeTag) {
+        self.scope.push(Scope::new_with_tag(block, tag))
+    }
+
     pub fn pop(&mut self) {
         self.scope.pop();
+    }
+
+    /// Returns the tag closest to the top of the stack.
+    ///
+    /// If the top scope is not tagged checks the next one, repeating until one is found.
+    /// The root scope must always be tagged with [`ScopeTag::Root`].
+    ///
+    /// # Panics
+    ///
+    /// If the root scope is not tagged.
+    pub fn closest_tag(&self) -> ScopeTag {
+        self.find_in_scope(
+            |scope| scope.tag(),
+            || panic!("at least one scope must be tagged"),
+        )
+        .unwrap()
     }
 
     /// Creates a `function.def` operation.

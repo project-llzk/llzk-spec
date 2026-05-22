@@ -2,7 +2,7 @@ use crate::{ast::Span, diagnostic::Diagnostic};
 use thiserror::Error;
 
 /// Top-level compilation error categories.
-#[derive(Debug, Error)]
+#[derive(Debug, Error, PartialEq, Eq)]
 pub enum TypeAnalysisError {
     #[error("duplicate predicate '{0}'")]
     DuplicatePredicate(String),

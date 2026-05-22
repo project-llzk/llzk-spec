@@ -15,6 +15,9 @@ pub(super) struct ScopeStack<'ast, L, F> {
 }
 
 impl<'ast, L, F> ScopeStack<'ast, L, F> {
+    /// Creates a ready to use stack of scopes with a root scope.
+    ///
+    /// There is no need of pushing a scope before using the stack.
     pub fn new() -> Self {
         Self {
             root: Scope::new(true),
@@ -22,31 +25,38 @@ impl<'ast, L, F> ScopeStack<'ast, L, F> {
         }
     }
 
+    /// Returns a reference to the top of the stack.
     pub fn top(&mut self) -> &mut Scope<'ast, L, F> {
         self.scopes.last_mut().unwrap_or(&mut self.root)
     }
 
+    /// Pushes a new scope.
     pub fn push(&mut self) {
         self.scopes.push(Scope::new(false))
     }
 
+    /// Pushes a new scope that is tagged as a local limit.
+    ///
+    /// Scopes tagged as local limits act as barriers when looking up local bindings, hiding any
+    /// locals beyond the limit from the lookup.
     pub fn push_local_limit(&mut self) {
         self.scopes.push(Scope::new(true))
     }
 
+    /// Pops the top scope.
     pub fn pop(&mut self) {
         self.scopes.pop();
     }
 
+    /// Looks for a local binding with the given identifier.
     pub fn find_local(&self, name: &Identifier<'ast>) -> Result<&L, TypeAnalysisError> {
-        self.ordered_scopes()
-            // Only check scopes that are within the local limit.
-            .take_while(|scope| !scope.local_limit)
+        self.ordered_local_scopes()
             // Fetch the closest binding
             .find_map(|scope| scope.locals.get(&name.symbol()))
             .ok_or_else(|| TypeAnalysisError::UnknownLocal(name.value().to_owned()))
     }
 
+    /// Looks for a predicate definition with the given identifier.
     pub fn find_predicate(&self, name: &Identifier<'ast>) -> Result<&F, TypeAnalysisError> {
         self.ordered_scopes()
             .find_map(|scope| scope.predicates.get(&name.symbol()))
@@ -56,6 +66,39 @@ impl<'ast, L, F> ScopeStack<'ast, L, F> {
     /// Returns an iterator of the scopes in stack order top to bottom.
     fn ordered_scopes(&self) -> impl Iterator<Item = &Scope<'ast, L, F>> {
         self.scopes.iter().rev().chain([&self.root])
+    }
+
+    /// Returns an iterator of the scopes in stack order top to bottom until a local limit is
+    /// reached.
+    fn ordered_local_scopes(&self) -> impl Iterator<Item = &Scope<'ast, L, F>> {
+        struct Iter<I> {
+            it: I,
+            limit_reached: bool,
+        }
+
+        impl<'s, 'ast, L, F, I> Iterator for Iter<I>
+        where
+            I: Iterator<Item = &'s Scope<'ast, L, F>>,
+            'ast: 's,
+            L: 's,
+            F: 's,
+        {
+            type Item = &'s Scope<'ast, L, F>;
+
+            fn next(&mut self) -> Option<Self::Item> {
+                if self.limit_reached {
+                    return None;
+                }
+                let next = self.it.next()?;
+                self.limit_reached = next.local_limit;
+                Some(next)
+            }
+        }
+
+        Iter {
+            it: self.ordered_scopes(),
+            limit_reached: false,
+        }
     }
 
     /// Returns an iterator of mutable references to the scopes in stack order top to bottom.
@@ -144,6 +187,7 @@ pub(super) struct Scope<'ast, L, F> {
 }
 
 impl<'ast, L, F> Scope<'ast, L, F> {
+    /// Creates a new scope.
     fn new(local_limit: bool) -> Self {
         Self {
             predicates: Default::default(),
@@ -152,6 +196,7 @@ impl<'ast, L, F> Scope<'ast, L, F> {
         }
     }
 
+    /// Binds the given value to a name in the predicates namespace.
     pub fn bind_predicate(
         &mut self,
         name: &Identifier<'ast>,
@@ -166,6 +211,7 @@ impl<'ast, L, F> Scope<'ast, L, F> {
         Ok(())
     }
 
+    /// Binds the given value to a name in the locals namespace.
     pub fn bind_local(&mut self, name: &Identifier<'ast>, l: L) -> Result<(), TypeAnalysisError> {
         if self.locals.contains_key(&name.symbol()) {
             return Err(TypeAnalysisError::DuplicateLocal(name.value().to_owned()));
@@ -189,5 +235,77 @@ where
         self.locals
             .iter()
             .try_for_each(|(symbol, binding)| writeln!(f, "    {}: {binding}", symbol.value()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::ast::{AstContext, Span};
+
+    use super::*;
+
+    type Scopes<'ast> = ScopeStack<'ast, usize, usize>;
+
+    fn ctx() -> AstContext {
+        AstContext::new()
+    }
+
+    fn ident<'ast>(ctx: &'ast AstContext, symbol: &str) -> Identifier<'ast> {
+        Identifier::new(ctx.symbol(symbol), Span::default())
+    }
+
+    #[test]
+    fn test_local_limits_1() {
+        let ctx = ctx();
+        let x = ident(&ctx, "x");
+        let y = ident(&ctx, "y");
+        let mut stack = Scopes::new();
+
+        // Test that 'x' can be accessed but 'y' cannot
+        // when 'x' is within the limit and 'y' is outside.
+        stack.top().bind_local(&y, 1).unwrap();
+        stack.push_local_limit();
+        stack.push();
+        stack.top().bind_local(&x, 2).unwrap();
+
+        assert_eq!(stack.find_local(&x), Ok(&2));
+        assert_eq!(
+            stack.find_local(&y),
+            Err(TypeAnalysisError::UnknownLocal("y".to_string()))
+        )
+    }
+
+    #[test]
+    fn test_local_limits_2() {
+        let ctx = ctx();
+        let x = ident(&ctx, "x");
+        let y = ident(&ctx, "y");
+        let mut stack = Scopes::new();
+
+        // Test that 'x' can be accessed but 'y' cannot
+        // when 'x' is right at the limit and 'y' is outside.
+        stack.top().bind_local(&y, 1).unwrap();
+        stack.push_local_limit();
+        stack.top().bind_local(&x, 2).unwrap();
+
+        assert_eq!(stack.find_local(&x), Ok(&2));
+        assert_eq!(
+            stack.find_local(&y),
+            Err(TypeAnalysisError::UnknownLocal("y".to_string()))
+        )
+    }
+
+    #[test]
+    fn test_shadowing() {
+        let ctx = ctx();
+        let x = ident(&ctx, "x");
+        let mut stack = Scopes::new();
+
+        // Test that when accesing 'x' we get the closest result back.
+        stack.top().bind_local(&x, 1).unwrap();
+        stack.push();
+        stack.top().bind_local(&x, 2).unwrap();
+
+        assert_eq!(stack.find_local(&x), Ok(&2));
     }
 }
