@@ -19,6 +19,7 @@ pub enum TypeAnalysisError {
 }
 
 impl TypeAnalysisError {
+    /// Converts the error into a list of diagnostics.
     pub fn into_diags(
         self,
         source_name: &str,

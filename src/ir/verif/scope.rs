@@ -36,6 +36,9 @@ pub(super) struct Scope<'ast, 'ctx, 'blk> {
 }
 
 impl<'ast, 'ctx, 'blk> Scope<'ast, 'ctx, 'blk> {
+    /// Creates a root scope based on the given module.
+    ///
+    /// Uses the module's body for insertion.
     pub fn root<'m>(module: &'blk Module<'ctx>) -> Self
     where
         'blk: 'ctx,
@@ -43,6 +46,7 @@ impl<'ast, 'ctx, 'blk> Scope<'ast, 'ctx, 'blk> {
         Self::new_with_tag(module.body(), ScopeTag::Root)
     }
 
+    /// Creates an untagged scope.
     pub fn new(block: BlockRef<'ctx, 'blk>) -> Self {
         Self {
             block,
@@ -52,6 +56,7 @@ impl<'ast, 'ctx, 'blk> Scope<'ast, 'ctx, 'blk> {
         }
     }
 
+    /// Creates a tagged scope.
     pub fn new_with_tag(block: BlockRef<'ctx, 'blk>, tag: ScopeTag) -> Self {
         Self {
             block,
@@ -61,6 +66,10 @@ impl<'ast, 'ctx, 'blk> Scope<'ast, 'ctx, 'blk> {
         }
     }
 
+    /// Binds a reference to a `function.def` operation to the given symbol.
+    ///
+    /// The reference must have been inserted somewhere with a lifetime greater or equal to the
+    /// block's lifetime. It could be the block pointed by this scope or a parent block.
     pub fn bind_predicate(
         &mut self,
         name: &TypedIdentifier<'ast, 'ctx>,
@@ -76,6 +85,9 @@ impl<'ast, 'ctx, 'blk> Scope<'ast, 'ctx, 'blk> {
         Ok(())
     }
 
+    /// Binds a SSA value to the given symbol.
+    ///
+    /// The SSA value must dominate any future users that point to the symbol.
     pub fn bind_local(
         &mut self,
         name: &TypedIdentifier<'ast, 'ctx>,
@@ -91,6 +103,7 @@ impl<'ast, 'ctx, 'blk> Scope<'ast, 'ctx, 'blk> {
         Ok(())
     }
 
+    /// Appends the operation into the block.
     pub fn append_operation(&mut self, op: impl Into<Operation<'ctx>>) -> OperationRef<'ctx, 'blk> {
         self.block.append_operation(op.into())
     }
@@ -115,6 +128,8 @@ impl<'ast, 'ctx, 'blk> Scope<'ast, 'ctx, 'blk> {
         llzk::symbol_table::insert(&parent_op, op.into())
     }
 
+    /// Appends an operation with one SSA result into the block. Then returns the SSA value with
+    /// its lifetime tied to the block's.
     pub fn append_operation_with_result(
         &mut self,
         op: impl Into<Operation<'ctx>>,
@@ -129,14 +144,17 @@ impl<'ast, 'ctx, 'blk> Scope<'ast, 'ctx, 'blk> {
         Ok(op_ref.result(0)?.into())
     }
 
+    /// Returns a reference to the predicates namespace.
     pub fn predicates(&self) -> &HashMap<Symbol<'ast>, FuncDefOpRef<'ctx, 'blk>> {
         &self.predicates
     }
 
+    /// Returns a reference to the locals namespace.
     pub fn locals(&self) -> &HashMap<Symbol<'ast>, Value<'ctx, 'blk>> {
         &self.locals
     }
 
+    /// Returns the tag of the scope, if available.
     pub fn tag(&self) -> Option<ScopeTag> {
         self.tag
     }

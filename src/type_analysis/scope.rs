@@ -9,6 +9,7 @@ use crate::{
     },
 };
 
+/// Stack of lexical scopes used during type-checking.
 pub(super) struct ScopeStack<'ast, L, F> {
     root: Scope<'ast, L, F>,
     scopes: Vec<Scope<'ast, L, F>>,

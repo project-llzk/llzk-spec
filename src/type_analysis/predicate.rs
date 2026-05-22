@@ -2,7 +2,9 @@ use crate::{
     ast::{Block, PredicateDecl, Spanned, Statement, Visitable as _, Visitor},
     diagnostic::Diagnostic,
     type_analysis::{
-        TypeProperties, TypeSystem, TypingResult, block::BlockTypeChecker, ctx::TypeInferenceCtx,
+        TypeProperties, TypeSystem, TypingResult,
+        block::{BlockTypeChecker, BlockTypeCheckerCfg},
+        ctx::TypeInferenceCtx,
         helpers::extract_result,
     },
 };
@@ -176,7 +178,14 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<PredicateDecl<'ast>>
         let mut diags = vec![];
         let ins = self.bind_and_push(decl, &mut diags);
 
-        let mut block_tc = BlockTypeChecker::new(self.source_name, self.ctx, false, false);
+        let mut block_tc = BlockTypeChecker::new(
+            self.source_name,
+            self.ctx,
+            BlockTypeCheckerCfg {
+                allows_invariants: false,
+                allows_scoped: false,
+            },
+        );
         let body = decl.body().accept(&mut block_tc)?;
 
         // Check that the last statement is a return and no other statement is.

@@ -4,9 +4,11 @@ use crate::type_analysis::{
     FnTypeProperties, TypeProperties, TypeSystem, error::TypeAnalysisError, scope::ScopeStack,
 };
 
+/// Convenience alias for the substitutions mapping between type variable ids and resolved types.
 pub(super) type Subst<T> =
     HashMap<<<T as TypeSystem>::Type as TypeProperties>::VarId, <T as TypeSystem>::Type>;
 
+/// Shared type inference context used during type-checking.
 pub(super) struct TypeInferenceCtx<'ast, T: TypeSystem> {
     scope: ScopeStack<'ast, T::Type, T::FnType>,
     constraints: Vec<Constraint<T::Type>>,
@@ -15,6 +17,7 @@ pub(super) struct TypeInferenceCtx<'ast, T: TypeSystem> {
 }
 
 impl<'ast, T: TypeSystem> TypeInferenceCtx<'ast, T> {
+    /// Creates a new context using the given type system.
     pub fn new(ts: T) -> Self {
         Self {
             scope: ScopeStack::new(),
@@ -24,10 +27,12 @@ impl<'ast, T: TypeSystem> TypeInferenceCtx<'ast, T> {
         }
     }
 
+    /// Returns a mutable reference to the type system.
     pub fn ts(&mut self) -> &mut T {
         &mut self.ts
     }
 
+    /// Returns a mutable reference to the scopes stack.
     pub fn scope(&mut self) -> &mut ScopeStack<'ast, T::Type, T::FnType> {
         &mut self.scope
     }
@@ -62,6 +67,7 @@ impl<'ast, T: TypeSystem> TypeInferenceCtx<'ast, T> {
         Ok(())
     }
 
+    /// Handles unification of a single constraint.
     fn unify_pair(&mut self, lhs: &T::Type, rhs: &T::Type, errs: &mut Vec<TypeAnalysisError>) {
         if lhs == rhs {
             return;
@@ -99,6 +105,7 @@ impl<'ast, T: TypeSystem> TypeInferenceCtx<'ast, T> {
         ))
     }
 
+    /// Handles unification of a constraint between function types.
     fn unify_fn_pair(&mut self, lhs: T::FnType, rhs: T::FnType, errs: &mut Vec<TypeAnalysisError>) {
         if lhs.inputs().len() != rhs.inputs().len() || lhs.outputs().len() != rhs.outputs().len() {
             errs.push(TypeAnalysisError::UnexpectedTypes(
@@ -116,6 +123,7 @@ impl<'ast, T: TypeSystem> TypeInferenceCtx<'ast, T> {
         }
     }
 
+    /// Handles unification between a type variable and another type.
     fn unify_type_var(
         &mut self,
         id: <T::Type as TypeProperties>::VarId,
@@ -129,6 +137,7 @@ impl<'ast, T: TypeSystem> TypeInferenceCtx<'ast, T> {
         }
     }
 
+    /// Applies substitutions until the most concrete type available is found.
     fn apply(t: &T::Type, subst: &Subst<T>, ts: &mut T) -> T::Type {
         if t.is_var_type() {
             return subst
@@ -176,6 +185,7 @@ impl<'ast, T: TypeSystem> TypeInferenceCtx<'ast, T> {
     }
 }
 
+/// A type constraint between two types.
 #[derive(PartialEq, Eq, Debug)]
 struct Constraint<T> {
     lhs: T,
@@ -183,6 +193,7 @@ struct Constraint<T> {
 }
 
 impl<T> Constraint<T> {
+    /// Creates a new constraint.
     fn new(lhs: T, rhs: T) -> Self {
         Self { lhs, rhs }
     }

@@ -12,30 +12,38 @@ use crate::{
     },
 };
 
+pub(super) struct BlockTypeCheckerCfg {
+    /// Whether invariant declarations are allowed in this context.
+    pub allows_invariants: bool,
+    /// Whether scoped blocks are allowed in this context.
+    pub allows_scoped: bool,
+}
+
+/// Configurable type checker of generic blocks of code.
+///
+/// Declaration-like AST entities can reuse this type checker by passing the correct configuration
+/// for their particular semantics.
 pub(super) struct BlockTypeChecker<'ctx, 'ast, T: TypeSystem> {
     source_name: &'ast str,
     ctx: &'ctx mut TypeInferenceCtx<'ast, T>,
-    /// Whether invariant declarations are allowed in this context.
-    allows_invariants: bool,
-    /// Whether scoped blocks are allowed in this context.
-    allows_scoped: bool,
+    cfg: BlockTypeCheckerCfg,
 }
 
 impl<'ctx, 'ast, T: TypeSystem> BlockTypeChecker<'ctx, 'ast, T> {
+    /// Creates a new block type checker.
     pub fn new(
         source_name: &'ast str,
         ctx: &'ctx mut TypeInferenceCtx<'ast, T>,
-        allows_invariants: bool,
-        allows_scoped: bool,
+        cfg: BlockTypeCheckerCfg,
     ) -> Self {
         Self {
             source_name,
             ctx,
-            allows_invariants,
-            allows_scoped,
+            cfg,
         }
     }
 
+    /// Type-checks a binary expression.
     fn check_binary_op_types(
         &mut self,
         op: BinaryOp,
@@ -62,6 +70,7 @@ impl<'ctx, 'ast, T: TypeSystem> BlockTypeChecker<'ctx, 'ast, T> {
         );
     }
 
+    /// Type-checks an unary expression.
     fn check_unary_op_types(
         &mut self,
         op: UnaryOp,
@@ -108,7 +117,7 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Statement<'ast>> for BlockTypeChecker<'c
             } => {
                 let result = statement.accept(self);
 
-                if self.allows_scoped {
+                if self.cfg.allows_scoped {
                     result.map(|inner| Statement::Scoped {
                         scope: *scope,
                         statement: Box::new(inner),
@@ -173,7 +182,7 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Statement<'ast>> for BlockTypeChecker<'c
             }),
 
             Statement::Invariant(decl) => {
-                if self.allows_invariants {
+                if self.cfg.allows_invariants {
                     todo!()
                 } else {
                     Err(vec![Diagnostic::new(
@@ -316,7 +325,8 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Expression<'ast>> for BlockTypeChecker<'
                     .clone();
                 // Add constraints between the types of the expressions and the declared type of
                 // the function type.
-                if callee_type.inputs().len() != new_args.len() {
+                let callee_inputs = callee_type.inputs();
+                if callee_inputs.len() != new_args.len() {
                     diags.push(Diagnostic::new(
                         self.source_name,
                         format!(
@@ -328,7 +338,7 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Expression<'ast>> for BlockTypeChecker<'
                         Some(*span),
                     ));
                 }
-                for (formal, arg) in std::iter::zip(callee_type.inputs(), &new_args) {
+                for (formal, arg) in std::iter::zip(callee_inputs, &new_args) {
                     let Some(arg) = arg else {
                         continue;
                     };

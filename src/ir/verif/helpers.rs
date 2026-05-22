@@ -77,26 +77,36 @@ impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
         Ok(op_ref.try_into()?)
     }
 
+    /// Returns a reference to an [`OpBuilder`].
     pub fn builder(&self) -> &OpBuilder<'ctx> {
         &self.builder
     }
 
+    /// Returns a reference to the MLIR context.
     pub fn context(&self) -> &'ctx melior::Context {
         &self.ctx.context
     }
 
+    /// Returns a mutable reference to the top of the scope stack.
     pub fn top_mut(&mut self) -> &mut Scope<'ast, 'ctx, 'blk> {
         self.scope.last_mut().unwrap()
     }
 
+    /// Pushes a new, untagged, scope.
+    ///
+    /// For pushing tagged scopes see [`Self::push_tagged`].
     pub fn push(&mut self, block: BlockRef<'ctx, 'blk>) {
         self.scope.push(Scope::new(block))
     }
 
+    /// Pushes a new tagged scope.
+    ///
+    /// For pushing without a tag see [`Self::push`].
     pub fn push_tagged(&mut self, block: BlockRef<'ctx, 'blk>, tag: ScopeTag) {
         self.scope.push(Scope::new_with_tag(block, tag))
     }
 
+    /// Pops the top of the scope stack.
     pub fn pop(&mut self) {
         self.scope.pop();
     }
@@ -134,10 +144,12 @@ impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
         Ok(op)
     }
 
+    /// Return the type representing felts.
     pub fn felt_type(&self) -> Type<'ctx> {
         self.ctx.felt_type()
     }
 
+    /// Creates a MLIR location pointing to the given span.
     pub fn location(&self, span: Span) -> Location<'ctx> {
         self.ctx.location_from_span(&self.filename, span)
     }
@@ -156,6 +168,7 @@ impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
             .ok_or_else(on_error)
     }
 
+    /// Looks for a SSA value binded to the given local symbol.
     pub fn find_symbol(
         &self,
         name: &TypedIdentifier<'ast, 'ctx>,
@@ -166,6 +179,7 @@ impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
         )
     }
 
+    /// Looks for a `function.def` operation binded to the given predicate symbol.
     pub fn find_predicate(
         &self,
         name: &TypedIdentifier<'ast, 'ctx>,
@@ -176,6 +190,7 @@ impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
         )
     }
 
+    /// Lowers the given expression in the context of a conditional branch.
     pub fn lower_conditional_branch(
         &mut self,
         region: &Region<'ctx>,
@@ -199,6 +214,12 @@ impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
         })
     }
 
+    /// Looks for the actual name of the predicate binded by the given symbol.
+    ///
+    /// If two predicates on different scopes have the same name they may get inserted on the same
+    /// block, requiring that one of them changes its name to ensure uniqueness. When emitting
+    /// `function.call` ops we need to use the actual MLIR name and not the symbol given by the
+    /// callee in the AST.
     pub fn find_actual_function_name(
         &self,
         name: &TypedIdentifier<'ast, 'ctx>,
@@ -211,6 +232,8 @@ impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
         Ok(FlatSymbolRefAttribute::new(self.context(), name.value()))
     }
 
+    /// Visits a collection of entities that this type can visit, collecting the result of each
+    /// visit in a list.
     pub fn visit_many<V, R>(&mut self, entities: &[V]) -> Result<Vec<R>, CompileError>
     where
         Self: Visitor<V, Output = Result<R, CompileError>>,
@@ -220,6 +243,9 @@ impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
     }
 }
 
+/// Visits an entity inside a fresh scope.
+///
+/// The scope uses a block that is added to the given region and it popped before returning.
 pub fn accept_in_new_scope<'ast, 'ctx, 'blk, V, R>(
     region: &Region<'ctx>,
     scope: &mut SpecCodegen<'ast, 'ctx, 'blk>,

@@ -3,12 +3,14 @@ use crate::{
     type_analysis::{TypeInferenceCtx, TypeSystem, TypingResult},
 };
 
+/// Handles type checking contract declarations.
 pub(super) struct ContractTypeChecker<'ctx, 'ast, T: TypeSystem> {
     source_name: &'ast str,
     ctx: &'ctx mut TypeInferenceCtx<'ast, T>,
 }
 
 impl<'ctx, 'ast, T: TypeSystem> ContractTypeChecker<'ctx, 'ast, T> {
+    /// Creates a new contract type checker.
     pub fn new(ctx: &'ctx mut TypeInferenceCtx<'ast, T>, source_name: &'ast str) -> Self {
         Self { ctx, source_name }
     }
