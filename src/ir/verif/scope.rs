@@ -1,14 +1,10 @@
 //! Lexical scopes handling.
 
-use std::collections::HashMap;
-
 use llzk::prelude::{FuncDefOpRef, OperationLike as _};
 use melior::ir::{BlockLike as _, BlockRef, Module, Operation, OperationRef, Value};
 
 use crate::{
-    ast::Symbol,
     diagnostic::CompileError,
-    ir::verif::TypedIdentifier,
     type_analysis::scope::{Scope, ScopeStack},
 };
 

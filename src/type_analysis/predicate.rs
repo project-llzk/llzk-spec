@@ -184,6 +184,9 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<PredicateDecl<'ast>>
             BlockTypeCheckerCfg {
                 allows_invariants: false,
                 allows_scoped: false,
+                allows_ensure_and_require: false,
+                allows_return: true,
+                allows_invariant_stmts: false,
             },
         );
         let body = decl.body().accept(&mut block_tc)?;

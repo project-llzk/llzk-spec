@@ -9,7 +9,7 @@ use melior::ir::Module;
 use crate::{
     ast::Span,
     diagnostic::CompileError,
-    type_analysis::{FnTypeProperties, TypeProperties, TypeSystem},
+    type_analysis::{ArrayTypeProperties, FnTypeProperties, TypeProperties, TypeSystem},
 };
 
 /// Context supporting IR handling and generation.
@@ -113,6 +113,8 @@ impl<'ctx> TypeSystem for MlirTypeSystem<'ctx> {
 
     type FnType = WrapFunctionType<'ctx>;
 
+    type ArrayType = ArrayType<'ctx>;
+
     fn bool_type(&mut self) -> Self::Type {
         self.ctx.bool_type()
     }
@@ -134,6 +136,7 @@ impl<'ctx> TypeSystem for MlirTypeSystem<'ctx> {
 
 impl<'ctx> TypeProperties for Type<'ctx> {
     type FnType = WrapFunctionType<'ctx>;
+    type ArrayType = ArrayType<'ctx>;
 
     type VarId = &'ctx str;
 
@@ -153,6 +156,26 @@ impl<'ctx> TypeProperties for Type<'ctx> {
 
     fn to_func_type(&self) -> Option<Self::FnType> {
         FunctionType::try_from(*self).ok().map(WrapFunctionType)
+    }
+
+    fn is_array_type(&self) -> bool {
+        is_array_type(*self)
+    }
+
+    fn to_array_type(&self) -> Option<Self::ArrayType> {
+        ArrayType::try_from(*self).ok()
+    }
+}
+
+impl<'ctx> ArrayTypeProperties for ArrayType<'ctx> {
+    type Type = Type<'ctx>;
+
+    fn inner_type(&self) -> Self::Type {
+        self.element_type()
+    }
+
+    fn contains_type_vars(&self) -> bool {
+        self.element_type().contains_type_vars()
     }
 }
 

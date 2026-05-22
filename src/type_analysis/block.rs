@@ -1,12 +1,10 @@
 use crate::{
-    ast::{
-        BinaryOp, Block, Expression, Span, Spanned as _, Statement, UnaryOp, Visitable as _,
-        Visitor,
-    },
+    ast::{Block, Spanned as _, Statement, Visitable as _, Visitor},
     diagnostic::Diagnostic,
     type_analysis::{
-        FnTypeProperties, TypeSystem, TypingResult,
+        TypeSystem, TypingResult,
         ctx::TypeInferenceCtx,
+        expression::{ExpressionTypeChecker, ExpressionTypeCheckerCfg},
         helpers::{check_many, extract_result},
         predicate::PredicateTypeChecker,
     },
@@ -17,6 +15,12 @@ pub(super) struct BlockTypeCheckerCfg {
     pub allows_invariants: bool,
     /// Whether scoped blocks are allowed in this context.
     pub allows_scoped: bool,
+    /// Whether ensure and require statements are allowed in this context.
+    pub allows_ensure_and_require: bool,
+    /// Whether return statements are allowed in this context.
+    pub allows_return: bool,
+    /// Whether increases, decreases, and step statements are allowed in this context.
+    pub allows_invariant_stmts: bool,
 }
 
 /// Configurable type checker of generic blocks of code.
@@ -42,57 +46,6 @@ impl<'ctx, 'ast, T: TypeSystem> BlockTypeChecker<'ctx, 'ast, T> {
             cfg,
         }
     }
-
-    /// Type-checks a binary expression.
-    fn check_binary_op_types(
-        &mut self,
-        op: BinaryOp,
-        left: Option<&Expression<'_, T::Type>>,
-        right: Option<&Expression<'_, T::Type>>,
-        diags: &mut Vec<Diagnostic>,
-        span: Span,
-    ) {
-        let expected = op.expected_type(self.ctx.ts());
-
-        for expr in [left, right].into_iter().flatten() {
-            self.ctx.add_constraint(expected.clone(), expr.r#type());
-        }
-
-        extract_result(
-            self.ctx.unify().map_err(|errs| {
-                errs.into_iter()
-                    .flat_map(|err| {
-                        err.into_diags(self.source_name, Some(span), format!("in binary op '{op}'"))
-                    })
-                    .collect()
-            }),
-            diags,
-        );
-    }
-
-    /// Type-checks an unary expression.
-    fn check_unary_op_types(
-        &mut self,
-        op: UnaryOp,
-        expr: Option<&Expression<'_, T::Type>>,
-        diags: &mut Vec<Diagnostic>,
-        span: Span,
-    ) {
-        if let Some(expr) = expr {
-            let expected = op.expected_type(self.ctx.ts());
-            self.ctx.add_constraint(expected, expr.r#type());
-        }
-        extract_result(
-            self.ctx.unify().map_err(|errs| {
-                errs.into_iter()
-                    .flat_map(|err| {
-                        err.into_diags(self.source_name, Some(span), format!("in unary op '{op}'"))
-                    })
-                    .collect()
-            }),
-            diags,
-        );
-    }
 }
 
 impl<'ast, 'ctx, T: TypeSystem> Visitor<Block<'ast>> for BlockTypeChecker<'ctx, 'ast, T> {
@@ -105,6 +58,21 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Block<'ast>> for BlockTypeChecker<'ctx, 
     }
 }
 
+macro_rules! stmt_not_allowed {
+    ($name:literal, $self:expr, $span:expr, $diags:expr) => {{
+        let mut diags = $diags;
+        diags.push(Diagnostic::new(
+            $self.source_name,
+            concat!($name, " statement is not allowed in this context"),
+            Some(*$span),
+        ));
+        Err(diags)
+    }};
+    ($name:literal, $self:expr, $span:expr) => {
+        stmt_not_allowed!($name, $self, $span, Vec::<Diagnostic>::with_capacity(1))
+    };
+}
+
 impl<'ast, 'ctx, T: TypeSystem> Visitor<Statement<'ast>> for BlockTypeChecker<'ctx, 'ast, T> {
     type Output = TypingResult<Statement<'ast, T::Type>>;
 
@@ -114,41 +82,112 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Statement<'ast>> for BlockTypeChecker<'c
                 scope,
                 statement,
                 span,
-            } => {
-                let result = statement.accept(self);
-
-                if self.cfg.allows_scoped {
-                    result.map(|inner| Statement::Scoped {
-                        scope: *scope,
-                        statement: Box::new(inner),
-                        span: *span,
-                    })
-                } else {
-                    let mut diags = result.err().unwrap_or_default();
-                    diags.push(Diagnostic::new(
-                        self.source_name,
-                        "scoped block is not allowed in this context",
-                        Some(*span),
-                    ));
-                    Err(diags)
-                }
+            } if !self.cfg.allows_scoped => {
+                stmt_not_allowed!(
+                    "scoped block",
+                    self,
+                    span,
+                    statement.accept(self).err().unwrap_or_default()
+                )
             }
+            Statement::Scoped {
+                scope,
+                statement,
+                span,
+            } => {
+                self.ctx.scope().push(());
+                let new = statement.accept(self).map(|inner| Statement::Scoped {
+                    scope: *scope,
+                    statement: Box::new(inner),
+                    span: *span,
+                });
+                self.ctx.scope().pop();
+                new
+            }
+
             Statement::Block(block) => {
                 self.ctx.scope().push(());
                 let new = block.accept(self).map(Statement::Block);
                 self.ctx.scope().pop();
                 new
             }
-            Statement::Require { expression, span } => Ok(Statement::Require {
-                expression: expression.accept(self)?,
-                span: *span,
-            }),
-            Statement::Ensure { expression, span } => Ok(Statement::Ensure {
-                expression: expression.accept(self)?,
-                span: *span,
-            }),
+
+            //    e : Bool
+            // ----------------
+            //  require e : ()
+            Statement::Require { expression, span } if !self.cfg.allows_ensure_and_require => {
+                stmt_not_allowed!("require", self, span)
+            }
+            Statement::Require { expression, span } => {
+                let mut diags = vec![];
+                let mut expr_tc = ExpressionTypeChecker::new(self.source_name, self.ctx);
+                let expression = extract_result(expression.accept(&mut expr_tc), &mut diags);
+                if let Some(expr) = expression.as_ref() {
+                    let bool_type = self.ctx.ts().bool_type();
+                    self.ctx.add_constraint(bool_type, expr.r#type());
+                    extract_result(
+                        self.ctx.unify().map_err(|errs| {
+                            errs.into_iter()
+                                .flat_map(|err| {
+                                    err.into_diags(
+                                        self.source_name,
+                                        Some(*span),
+                                        "on require statement",
+                                    )
+                                })
+                                .collect()
+                        }),
+                        &mut diags,
+                    );
+                }
+                if !diags.is_empty() {
+                    return Err(diags);
+                }
+                Ok(Statement::Require {
+                    expression: expression.unwrap(),
+                    span: *span,
+                })
+            }
+
+            //    e : Bool
+            // ---------------
+            //  ensure e : ()
+            Statement::Ensure { expression, span } if !self.cfg.allows_ensure_and_require => {
+                stmt_not_allowed!("ensure", self, span)
+            }
+            Statement::Ensure { expression, span } => {
+                let mut diags = vec![];
+                let mut expr_tc = ExpressionTypeChecker::new(self.source_name, self.ctx);
+                let expression = extract_result(expression.accept(&mut expr_tc), &mut diags);
+                if let Some(expr) = expression.as_ref() {
+                    let bool_type = self.ctx.ts().bool_type();
+                    self.ctx.add_constraint(bool_type, expr.r#type());
+                    extract_result(
+                        self.ctx.unify().map_err(|errs| {
+                            errs.into_iter()
+                                .flat_map(|err| {
+                                    err.into_diags(
+                                        self.source_name,
+                                        Some(*span),
+                                        "on ensure statement",
+                                    )
+                                })
+                                .collect()
+                        }),
+                        &mut diags,
+                    );
+                }
+                if !diags.is_empty() {
+                    return Err(diags);
+                }
+                Ok(Statement::Ensure {
+                    expression: expression.unwrap(),
+                    span: *span,
+                })
+            }
             Statement::Let { name, value, span } => {
-                let value = value.accept(self)?;
+                let mut expr_tc = ExpressionTypeChecker::new(self.source_name, self.ctx);
+                let value = value.accept(&mut expr_tc)?;
                 self.ctx
                     .scope()
                     .top()
@@ -162,268 +201,153 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Statement<'ast>> for BlockTypeChecker<'c
                     span: *span,
                 })
             }
+
             // TODO: We need to know the type of the unused identifier.
             Statement::Unused { .. } => todo!(),
-            Statement::Return { expression, span } => Ok(Statement::Return {
-                expression: expression.accept(self)?,
-                span: *span,
-            }),
-            Statement::Increases { expression, span } => Ok(Statement::Increases {
-                expression: expression.accept(self)?,
-                span: *span,
-            }),
-            Statement::Decreases { expression, span } => Ok(Statement::Decreases {
-                expression: expression.accept(self)?,
-                span: *span,
-            }),
-            Statement::Step { expression, span } => Ok(Statement::Step {
-                expression: expression.accept(self)?,
-                span: *span,
-            }),
 
-            Statement::Invariant(decl) => {
-                if self.cfg.allows_invariants {
-                    todo!()
-                } else {
-                    Err(vec![Diagnostic::new(
-                        self.source_name,
-                        "invariant not allowed in this context",
-                        Some(decl.span()),
-                    )])
+            Statement::Return { expression, span } if !self.cfg.allows_return => {
+                stmt_not_allowed!("return", self, span)
+            }
+            Statement::Return { expression, span } => {
+                let mut expr_tc = ExpressionTypeChecker::new(self.source_name, self.ctx);
+                Ok(Statement::Return {
+                    expression: expression.accept(&mut expr_tc)?,
+                    span: *span,
+                })
+            }
+
+            //      e : Felt
+            // ------------------
+            //  increases e : ()
+            Statement::Increases { expression, span } if !self.cfg.allows_invariant_stmts => {
+                stmt_not_allowed!("increases", self, span)
+            }
+            Statement::Increases { expression, span } => {
+                let mut diags = vec![];
+                let mut expr_tc = ExpressionTypeChecker::new(self.source_name, self.ctx);
+                let expr = extract_result(expression.accept(&mut expr_tc), &mut diags);
+                if let Some(expr) = expr.as_ref() {
+                    let felt_type = self.ctx.ts().felt_type();
+                    self.ctx.add_constraint(felt_type, expr.r#type());
+                    extract_result(
+                        self.ctx.unify().map_err(|errs| {
+                            errs.into_iter()
+                                .flat_map(|err| {
+                                    err.into_diags(
+                                        self.source_name,
+                                        Some(*span),
+                                        "on increases statement",
+                                    )
+                                })
+                                .collect()
+                        }),
+                        &mut diags,
+                    );
                 }
+                if !diags.is_empty() {
+                    return Err(diags);
+                }
+                Ok(Statement::Increases {
+                    expression: expr.unwrap(),
+                    span: *span,
+                })
+            }
+
+            //      e : Felt
+            // ------------------
+            //  decreases e : ()
+            Statement::Decreases { expression, span } if !self.cfg.allows_invariant_stmts => {
+                stmt_not_allowed!("decreases", self, span)
+            }
+            Statement::Decreases { expression, span } => {
+                let mut diags = vec![];
+                let mut expr_tc = ExpressionTypeChecker::new(self.source_name, self.ctx);
+                let expr = extract_result(expression.accept(&mut expr_tc), &mut diags);
+                if let Some(expr) = expr.as_ref() {
+                    let felt_type = self.ctx.ts().felt_type();
+                    self.ctx.add_constraint(felt_type, expr.r#type());
+                    extract_result(
+                        self.ctx.unify().map_err(|errs| {
+                            errs.into_iter()
+                                .flat_map(|err| {
+                                    err.into_diags(
+                                        self.source_name,
+                                        Some(*span),
+                                        "on decreases statement",
+                                    )
+                                })
+                                .collect()
+                        }),
+                        &mut diags,
+                    );
+                }
+                if !diags.is_empty() {
+                    return Err(diags);
+                }
+                Ok(Statement::Decreases {
+                    expression: expr.unwrap(),
+                    span: *span,
+                })
+            }
+
+            //   e : Bool
+            // -------------
+            //  step e : ()
+            Statement::Step { expression, span } if !self.cfg.allows_invariant_stmts => {
+                stmt_not_allowed!("step", self, span)
+            }
+            Statement::Step { expression, span } => {
+                let mut diags = vec![];
+                let mut expr_tc = ExpressionTypeChecker::new_with_cfg(
+                    self.source_name,
+                    self.ctx,
+                    ExpressionTypeCheckerCfg { allows_old: true },
+                );
+                let expr = extract_result(expression.accept(&mut expr_tc), &mut diags);
+                if let Some(expr) = expr.as_ref() {
+                    let bool_type = self.ctx.ts().bool_type();
+                    self.ctx.add_constraint(bool_type, expr.r#type());
+                    extract_result(
+                        self.ctx.unify().map_err(|errs| {
+                            errs.into_iter()
+                                .flat_map(|err| {
+                                    err.into_diags(
+                                        self.source_name,
+                                        Some(*span),
+                                        "on step statement",
+                                    )
+                                })
+                                .collect()
+                        }),
+                        &mut diags,
+                    );
+                }
+                if !diags.is_empty() {
+                    return Err(diags);
+                }
+                Ok(Statement::Step {
+                    expression: expr.unwrap(),
+                    span: *span,
+                })
+            }
+
+            Statement::Invariant(decl) if !self.cfg.allows_invariants => {
+                Err(vec![Diagnostic::new(
+                    self.source_name,
+                    "invariant declaration not allowed in this context",
+                    Some(decl.span()),
+                )])
+            }
+            Statement::Invariant(_) => {
+                todo!()
             }
 
             Statement::Predicate(decl) => {
                 let mut pred_tc = PredicateTypeChecker::new(self.ctx, self.source_name);
                 decl.accept(&mut pred_tc).map(Statement::Predicate)
             }
+
             Statement::Empty { span } => Ok(Statement::Empty { span: *span }),
-        }
-    }
-}
-
-impl<'ast, 'ctx, T: TypeSystem> Visitor<Expression<'ast>> for BlockTypeChecker<'ctx, 'ast, T> {
-    type Output = TypingResult<Expression<'ast, T::Type>>;
-
-    fn visit(&mut self, expr: &Expression<'ast>) -> Self::Output {
-        match expr {
-            Expression::Conditional {
-                condition,
-                then_branch,
-                else_branch,
-                span,
-                ..
-            } => {
-                let mut diags = vec![];
-                let condition = extract_result(condition.accept(self), &mut diags);
-                let then_branch = extract_result(then_branch.accept(self), &mut diags);
-                let else_branch = extract_result(else_branch.accept(self), &mut diags);
-
-                let bool_type = self.ctx.ts().bool_type();
-                if let Some(condition) = &condition {
-                    self.ctx.add_constraint(bool_type, condition.r#type());
-                }
-
-                if let Some((then_branch, else_branch)) =
-                    then_branch.as_ref().zip(else_branch.as_ref())
-                {
-                    self.ctx
-                        .add_constraint(then_branch.r#type(), else_branch.r#type());
-                }
-
-                extract_result(
-                    self.ctx.unify().map_err(|err| {
-                        err.into_iter()
-                            .flat_map(|err| {
-                                err.into_diags(
-                                    self.source_name,
-                                    Some(*span),
-                                    "on conditional expression",
-                                )
-                            })
-                            .collect()
-                    }),
-                    &mut diags,
-                );
-
-                if !diags.is_empty() {
-                    return Err(diags);
-                }
-
-                let then_branch = then_branch.unwrap();
-                let return_type = self.ctx.resolve(then_branch.r#type());
-
-                Ok(Expression::Conditional {
-                    condition: Box::new(condition.unwrap()),
-                    then_branch: Box::new(then_branch),
-                    else_branch: Box::new(else_branch.unwrap()),
-                    span: *span,
-                    meta: return_type,
-                })
-            }
-            Expression::Binary {
-                op,
-                left,
-                right,
-                span,
-                ..
-            } => {
-                let mut diags = vec![];
-                let left = extract_result(left.accept(self), &mut diags);
-                let right = extract_result(right.accept(self), &mut diags);
-                self.check_binary_op_types(*op, left.as_ref(), right.as_ref(), &mut diags, *span);
-                if !diags.is_empty() {
-                    return Err(diags);
-                }
-
-                Ok(Expression::Binary {
-                    op: *op,
-                    left: Box::new(left.unwrap()),
-                    right: Box::new(right.unwrap()),
-                    span: *span,
-                    meta: op.return_type(self.ctx.ts()),
-                })
-            }
-            Expression::Unary { op, expr, span, .. } => {
-                let mut diags = vec![];
-                let expr = extract_result(expr.accept(self), &mut diags);
-                self.check_unary_op_types(*op, expr.as_ref(), &mut diags, *span);
-                if !diags.is_empty() {
-                    return Err(diags);
-                }
-
-                Ok(Expression::Unary {
-                    op: *op,
-                    expr: Box::new(expr.unwrap()),
-                    span: *span,
-                    meta: op.return_type(self.ctx.ts()),
-                })
-            }
-            Expression::Index { .. } => todo!(),
-            Expression::Member { .. } => todo!(),
-            // Calls only support predicates for the moment.
-            Expression::Call {
-                callee, args, span, ..
-            } => {
-                let bool_type = self.ctx.ts().bool_type();
-                let mut diags = vec![];
-                // Process arguments.
-                let mut new_args = Vec::with_capacity(args.len());
-                for arg in args {
-                    let arg = extract_result(arg.accept(self), &mut diags);
-                    new_args.push(arg);
-                }
-
-                // Locate callee.
-                let callee_type = self
-                    .ctx
-                    .scope()
-                    .find_predicate(callee)
-                    .map_err(|err| {
-                        err.into_diags(self.source_name, Some(*span), "on call expression")
-                    })?
-                    .clone();
-                // Add constraints between the types of the expressions and the declared type of
-                // the function type.
-                let callee_inputs = callee_type.inputs();
-                if callee_inputs.len() != new_args.len() {
-                    diags.push(Diagnostic::new(
-                        self.source_name,
-                        format!(
-                            "predicate '{}' expects {} arguments but for {}",
-                            callee.value(),
-                            callee_type.inputs().len(),
-                            new_args.len()
-                        ),
-                        Some(*span),
-                    ));
-                }
-                for (formal, arg) in std::iter::zip(callee_inputs, &new_args) {
-                    let Some(arg) = arg else {
-                        continue;
-                    };
-                    self.ctx.add_constraint(formal.clone(), arg.r#type());
-                }
-                if callee_type.outputs().len() != 1 {
-                    diags.push(Diagnostic::new(self.source_name, format!("expected predicate '{}' to return a single boolean expression but return {} expressions", callee.value(), callee_type.outputs().len()), Some(*span)));
-                }
-                self.ctx
-                    .add_constraint(bool_type.clone(), callee_type.outputs()[0].clone());
-
-                extract_result(
-                    self.ctx.unify().map_err(|err| {
-                        err.into_iter()
-                            .flat_map(|err| {
-                                err.into_diags(
-                                    self.source_name,
-                                    Some(*span),
-                                    format!("on callsite to '{}'", callee.value()),
-                                )
-                            })
-                            .collect()
-                    }),
-                    &mut diags,
-                );
-
-                if !diags.is_empty() {
-                    return Err(diags);
-                }
-
-                Ok(Expression::Call {
-                    callee: callee.with_meta(callee_type.into()),
-                    // If diags is empty then these should be Some.
-                    args: new_args.into_iter().map(Option::unwrap).collect(),
-                    span: *span,
-                    meta: bool_type,
-                })
-            }
-            Expression::Quantifier { .. } => todo!(),
-            Expression::Len { .. } => todo!(),
-            Expression::Old { .. } => todo!(),
-            Expression::Arg { index, span, .. } => {
-                let t = self
-                    .ctx
-                    .scope()
-                    .find_parameter(index)
-                    .cloned()
-                    .map_err(|err| {
-                        err.into_diags(
-                            self.source_name,
-                            Some(*span),
-                            format!("on argument #{index}"),
-                        )
-                    })?;
-                Ok(Expression::Arg {
-                    index: *index,
-                    span: *span,
-                    meta: t,
-                })
-            }
-            Expression::Nondet { span, .. } => Ok(Expression::Nondet {
-                span: *span,
-                meta: self.ctx.ts().felt_type(),
-            }),
-            Expression::Boolean { value, span, .. } => Ok(Expression::Boolean {
-                value: *value,
-                span: *span,
-                meta: self.ctx.ts().bool_type(),
-            }),
-            Expression::Number { value, span, .. } => Ok(Expression::Number {
-                value: *value,
-                span: *span,
-                meta: self.ctx.ts().felt_type(),
-            }),
-            Expression::Symbol(ident) => {
-                let t = self.ctx.scope().find_local(ident).cloned().map_err(|err| {
-                    err.into_diags(
-                        self.source_name,
-                        Some(ident.span()),
-                        format!("on symbol '{}'", ident.value()),
-                    )
-                })?;
-
-                Ok(Expression::Symbol(ident.with_meta(self.ctx.resolve(t))))
-            }
         }
     }
 }

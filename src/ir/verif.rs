@@ -20,7 +20,7 @@ use crate::{
         Context, MlirTypeSystem,
         verif::{
             helpers::accept_in_new_scope,
-            scope::{CodegenScope, CodegenScopeStack, ScopeData, ScopeTag},
+            scope::{CodegenScopeStack, ScopeData, ScopeTag},
         },
     },
     type_analysis::TypeChecker,

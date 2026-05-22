@@ -13,6 +13,7 @@ mod block;
 mod contract;
 mod ctx;
 mod error;
+mod expression;
 mod helpers;
 mod predicate;
 pub mod scope;
@@ -81,17 +82,28 @@ impl<'ast, T: TypeSystem> Visitor<Item<'ast>> for TypeChecker<'ast, T> {
 ///
 /// Helps decouple the inference engine from MLIR types, simplifying testing.
 pub trait TypeSystem {
+    /// Type used for representing any type.
     type Type: Clone
         + PartialEq
         + std::fmt::Display
         + std::fmt::Debug
         + TypeProperties<FnType = Self::FnType>;
+
+    /// Type used for representing function types.
     type FnType: Clone
         + PartialEq
         + std::fmt::Display
         + std::fmt::Debug
         + Into<Self::Type>
         + FnTypeProperties<Type = Self::Type>;
+
+    /// Type used for representing array types.
+    type ArrayType: Clone
+        + PartialEq
+        + std::fmt::Display
+        + std::fmt::Debug
+        + Into<Self::Type>
+        + ArrayTypeProperties<Type = Self::Type>;
 
     /// Create a boolean type.
     fn bool_type(&mut self) -> Self::Type;
@@ -114,31 +126,67 @@ pub trait TypeSystem {
 
 /// Trait for obtaining information about function types.
 pub trait FnTypeProperties {
+    /// Type used to represent generic types.
     type Type;
+
+    /// Returns the inputs of the function type.
     fn inputs(&self) -> Vec<Self::Type>;
 
+    /// Returns the outputs of the function type.
     fn outputs(&self) -> Vec<Self::Type>;
 
+    /// Returns true if the function has type variables on either its inputs or outputs.
     fn contains_type_vars(&self) -> bool;
 }
 
 /// Trait for obtaining information about types.
 pub trait TypeProperties {
+    /// Type used to represent function types.
     type FnType: FnTypeProperties<Type = Self>;
+
+    /// Type used for representing type variables.
     type VarId: Copy + Clone + PartialEq + Eq + std::fmt::Debug + std::hash::Hash;
 
+    /// Type used to represent array types.
+    type ArrayType: ArrayTypeProperties<Type = Self>;
+
+    /// Returns true if the type is representing a type variable.
     fn is_var_type(&self) -> bool;
 
+    /// Returns the id of the type variable, if available.
     fn var_id(&self) -> Option<Self::VarId>;
 
+    /// Returns true if the type is a function type.
     fn is_func_type(&self) -> bool;
 
+    /// Converts the type into the concrete function type representation.
     fn to_func_type(&self) -> Option<Self::FnType>;
 
+    /// Returns true if the type contains type variables.
     fn contains_type_vars(&self) -> bool {
         self.is_var_type()
             || (self.is_func_type() && self.to_func_type().is_some_and(|f| f.contains_type_vars()))
+            || (self.is_array_type()
+                && self.to_array_type().is_some_and(|a| a.contains_type_vars()))
     }
+
+    /// Returns true if the type is an array type.
+    fn is_array_type(&self) -> bool;
+
+    /// Converts the type into the concrete array type representation.
+    fn to_array_type(&self) -> Option<Self::ArrayType>;
+}
+
+/// Trait for obtaining information about array types.
+pub trait ArrayTypeProperties {
+    /// Type used to represent generic types.
+    type Type;
+
+    /// Returns the inner type of the array.
+    fn inner_type(&self) -> Self::Type;
+
+    /// Returns true if the array has type vars.
+    fn contains_type_vars(&self) -> bool;
 }
 
 #[cfg(test)]

@@ -10,6 +10,7 @@ pub struct MockTypeSystem {
 impl TypeSystem for MockTypeSystem {
     type Type = MockType;
     type FnType = MockFnType;
+    type ArrayType = MockArrayType;
 
     fn bool_type(&mut self) -> Self::Type {
         MockType::Bool
@@ -40,6 +41,7 @@ pub enum MockType {
     Felt,
     Bool,
     Fun(MockFnType),
+    Array(MockArrayType),
     Var(TypeVarId),
 }
 
@@ -49,10 +51,21 @@ impl From<MockFnType> for MockType {
     }
 }
 
+impl From<MockArrayType> for MockType {
+    fn from(value: MockArrayType) -> Self {
+        Self::Array(value)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MockFnType {
     ins: Vec<MockType>,
     outs: Vec<MockType>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MockArrayType {
+    inner: Box<MockType>,
 }
 
 impl std::fmt::Display for MockType {
@@ -62,9 +75,17 @@ impl std::fmt::Display for MockType {
             MockType::Bool => write!(f, "Bool"),
             MockType::Fun(fun) => write!(f, "{fun}"),
             MockType::Var(id) => write!(f, "τ{id}"),
+            MockType::Array(a) => write!(f, "{a}"),
         }
     }
 }
+
+impl std::fmt::Display for MockArrayType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Array {}", &self.inner)
+    }
+}
+
 impl std::fmt::Display for MockFnType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Fn(")?;
@@ -110,6 +131,7 @@ impl FnTypeProperties for MockFnType {
 
 impl TypeProperties for MockType {
     type FnType = MockFnType;
+    type ArrayType = MockArrayType;
 
     type VarId = TypeVarId;
 
@@ -133,5 +155,28 @@ impl TypeProperties for MockType {
             MockType::Fun(fn_type) => Some(fn_type.clone()),
             _ => None,
         }
+    }
+
+    fn is_array_type(&self) -> bool {
+        matches!(self, Self::Array(_))
+    }
+
+    fn to_array_type(&self) -> Option<Self::ArrayType> {
+        match self {
+            MockType::Array(a) => Some(a.clone()),
+            _ => None,
+        }
+    }
+}
+
+impl ArrayTypeProperties for MockArrayType {
+    type Type = MockType;
+
+    fn inner_type(&self) -> Self::Type {
+        self.inner.as_ref().clone()
+    }
+
+    fn contains_type_vars(&self) -> bool {
+        self.inner.contains_type_vars()
     }
 }
