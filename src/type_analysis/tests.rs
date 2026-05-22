@@ -55,18 +55,6 @@ pub struct MockFnType {
     outs: Vec<MockType>,
 }
 
-impl MockFnType {
-    pub fn new(
-        ins: impl IntoIterator<Item = MockType>,
-        outs: impl IntoIterator<Item = MockType>,
-    ) -> Self {
-        Self {
-            ins: ins.into_iter().collect(),
-            outs: outs.into_iter().collect(),
-        }
-    }
-}
-
 impl std::fmt::Display for MockType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

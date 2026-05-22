@@ -73,12 +73,12 @@ impl Context {
     }
 
     /// Returns a type representing a boolean.
-    pub fn bool_type(&self) -> Type {
+    pub fn bool_type(&self) -> Type<'_> {
         IntegerType::new(self.context(), 1).into()
     }
 
     /// Returns a type representing a finite field element.
-    pub fn felt_type(&self) -> Type {
+    pub fn felt_type(&self) -> Type<'_> {
         match self.prime() {
             Some(prime) => FeltType::with_field(self.context(), prime),
             None => FeltType::new(self.context()),

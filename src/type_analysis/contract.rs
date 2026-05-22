@@ -18,6 +18,8 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<ContractDecl<'ast>> for ContractTypeChec
     type Output = TypingResult<ContractDecl<'ast, T::Type>>;
 
     fn visit(&mut self, _: &ContractDecl<'ast>) -> Self::Output {
+        let _ = self.ctx;
+        let _ = self.source_name;
         todo!("contract type checking is not implemented yet")
     }
 }

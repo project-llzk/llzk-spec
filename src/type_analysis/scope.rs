@@ -14,11 +14,7 @@ pub(super) struct ScopeStack<'ast, L, F> {
     scopes: Vec<Scope<'ast, L, F>>,
 }
 
-impl<'ast, L, F> ScopeStack<'ast, L, F>
-where
-    L: std::fmt::Display,
-    F: std::fmt::Display,
-{
+impl<'ast, L, F> ScopeStack<'ast, L, F> {
     pub fn new() -> Self {
         Self {
             root: Scope::new(true),
@@ -87,10 +83,10 @@ where
             .for_each(|f| {
                 let mut ins = f.inputs().to_vec();
                 let mut outs = f.outputs().to_vec();
-                for (n, i) in ins.iter_mut().enumerate() {
+                for i in ins.iter_mut() {
                     let _ = propagate_type::<T, L>(i, subst);
                 }
-                for (n, o) in outs.iter_mut().enumerate() {
+                for o in outs.iter_mut() {
                     let _ = propagate_type::<T, L>(o, subst);
                 }
                 let r = ts.func_type(&ins, &outs);
@@ -100,7 +96,7 @@ where
         fn propagate_type<T, L>(l: &mut L, subst: &Subst<T>) -> Option<()>
         where
             T: TypeSystem<Type = L>,
-            L: TypeProperties + Clone + std::fmt::Display,
+            L: TypeProperties + Clone,
         {
             let id = l.var_id()?;
             let r = subst.get(&id)?;
@@ -120,15 +116,20 @@ where
         self.ordered_scopes_mut()
             .flat_map(|scope| scope.predicates.values_mut())
     }
+}
 
-    /// Dumps the scope stack to stderr.
-    pub(super) fn dump(&self) {
+impl<L, F> std::fmt::Debug for ScopeStack<'_, L, F>
+where
+    L: std::fmt::Display,
+    F: std::fmt::Display,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let scope_count = self.scopes.len() + 1;
-        self.ordered_scopes().enumerate().for_each(|(n, s)| {
+        self.ordered_scopes().enumerate().try_for_each(|(n, s)| {
             let n = scope_count - n;
-            eprintln!("Scope #{n}");
-            s.dump();
-        });
+            writeln!(f, "Scope #{n}")?;
+            std::fmt::Debug::fmt(s, f)
+        })
     }
 }
 
@@ -142,11 +143,7 @@ pub(super) struct Scope<'ast, L, F> {
     local_limit: bool,
 }
 
-impl<'ast, L, F> Scope<'ast, L, F>
-where
-    L: std::fmt::Display,
-    F: std::fmt::Display,
-{
+impl<'ast, L, F> Scope<'ast, L, F> {
     fn new(local_limit: bool) -> Self {
         Self {
             predicates: Default::default(),
@@ -176,16 +173,21 @@ where
         self.locals.insert(name.symbol(), l);
         Ok(())
     }
+}
 
-    /// Dumps the scope to stderr.
-    fn dump(&self) {
-        eprintln!("  Predicates:");
-        self.predicates.iter().for_each(|(symbol, binding)| {
-            eprintln!("    {}: {binding}", symbol.value());
-        });
-        eprintln!("  Locals:");
-        self.locals.iter().for_each(|(symbol, binding)| {
-            eprintln!("    {}: {binding}", symbol.value());
-        });
+impl<L, F> std::fmt::Debug for Scope<'_, L, F>
+where
+    L: std::fmt::Display,
+    F: std::fmt::Display,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "  Predicates:")?;
+        self.predicates
+            .iter()
+            .try_for_each(|(symbol, binding)| writeln!(f, "    {}: {binding}", symbol.value()))?;
+        writeln!(f, "  Locals:")?;
+        self.locals
+            .iter()
+            .try_for_each(|(symbol, binding)| writeln!(f, "    {}: {binding}", symbol.value()))
     }
 }

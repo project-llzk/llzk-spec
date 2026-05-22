@@ -1,21 +1,11 @@
 //! Type analysis of the AST.
 
-use std::{collections::HashMap, marker::PhantomData};
-
-use llzk::dialect::bool;
-
 use crate::{
-    ast::{
-        BinaryOp, Block, ContractDecl, Document, Expression, Identifier, Item, PredicateDecl, Span,
-        Spanned as _, Statement, Symbol, UnaryOp, Visitable, Visitor,
-    },
+    ast::{Document, Item, Spanned as _, Visitable, Visitor},
     diagnostic::{CompileError, Diagnostic},
     type_analysis::{
-        contract::ContractTypeChecker,
-        ctx::TypeInferenceCtx,
-        helpers::{check_many, extract_result},
+        contract::ContractTypeChecker, ctx::TypeInferenceCtx, helpers::check_many,
         predicate::PredicateTypeChecker,
-        scope::ScopeStack,
     },
 };
 

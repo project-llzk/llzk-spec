@@ -14,7 +14,7 @@ use melior::ir::{
 };
 
 use crate::{
-    ast::{self, Span, Spanned as _, Visitable, Visitor},
+    ast::{Span, Spanned as _, Visitable, Visitor},
     diagnostic::CompileError,
     ir::verif::{Scope, SpecCodegen, TypedExpression, TypedIdentifier, TypedPredicateDecl},
 };

@@ -1,5 +1,5 @@
 use crate::{
-    ast::{Block, Identifier, PredicateDecl, Spanned, Statement, Visitable as _, Visitor},
+    ast::{Block, PredicateDecl, Spanned, Statement, Visitable as _, Visitor},
     diagnostic::Diagnostic,
     type_analysis::{
         TypeProperties, TypeSystem, TypingResult, block::BlockTypeChecker, ctx::TypeInferenceCtx,
@@ -26,14 +26,13 @@ impl<'ctx, 'ast, T: TypeSystem> PredicateTypeChecker<'ctx, 'ast, T> {
                 // Skip the last statement since that one is allowed to be a return.
                 .skip(1)
                 .rev()
-                .filter_map(|stmt| {
-                    matches!(stmt, Statement::Return { .. }).then(|| {
-                        Diagnostic::new(
-                            self.source_name,
-                            format!("return statements must be the last statement in a predicate"),
-                            Some(stmt.span()),
-                        )
-                    })
+                .filter(|stmt| matches!(stmt, Statement::Return { .. }))
+                .map(|stmt| {
+                    Diagnostic::new(
+                        self.source_name,
+                        "return statements must be the last statement in a predicate",
+                        Some(stmt.span()),
+                    )
                 }),
         )
     }
@@ -46,7 +45,7 @@ impl<'ctx, 'ast, T: TypeSystem> PredicateTypeChecker<'ctx, 'ast, T> {
         let Some(last) = block.statements().last() else {
             diags.push(Diagnostic::new(
                 self.source_name,
-                format!("predicates cannot have an empty body"),
+                "predicates cannot have an empty body",
                 Some(block.span()),
             ));
             return;
@@ -69,7 +68,7 @@ impl<'ctx, 'ast, T: TypeSystem> PredicateTypeChecker<'ctx, 'ast, T> {
             }
             _ => diags.push(Diagnostic::new(
                 self.source_name,
-                format!("predicates with a block body must end with a return statement"),
+                "predicates with a block body must end with a return statement",
                 Some(block.span()),
             )),
         }
@@ -85,7 +84,6 @@ impl<'ctx, 'ast, T: TypeSystem> PredicateTypeChecker<'ctx, 'ast, T> {
             std::iter::repeat_with(|| self.ctx.ts().fresh_var()).take(decl.params().len()),
         );
         let fn_type = self.ctx.ts().predicate_type(&ins);
-        let mut diags = vec![];
 
         // Bind the predicate to the current scope.
         extract_result(
@@ -100,9 +98,9 @@ impl<'ctx, 'ast, T: TypeSystem> PredicateTypeChecker<'ctx, 'ast, T> {
                         format!("on declaration of predicate '{}'", decl.name().value()),
                     )
                 }),
-            &mut diags,
+            diags,
         );
-        self.ctx.scope().push();
+        self.ctx.scope().push_local_limit();
         // Bind the formals to the new scope.
         for (formal, r#type) in std::iter::zip(decl.params(), &ins) {
             extract_result(
@@ -121,7 +119,7 @@ impl<'ctx, 'ast, T: TypeSystem> PredicateTypeChecker<'ctx, 'ast, T> {
                             ),
                         )
                     }),
-                &mut diags,
+                diags,
             );
         }
 
@@ -140,8 +138,8 @@ impl<'ctx, 'ast, T: TypeSystem> PredicateTypeChecker<'ctx, 'ast, T> {
         diags: &mut Vec<Diagnostic>,
     ) {
         for name in decl.params() {
-            /// The param MUST exist. If it doesn't is a bug in our part because we are probably
-            /// calling this method wrong.
+            // The param MUST exist. If it doesn't is a bug in our part because we are probably
+            // calling this method wrong.
             let binding = self.ctx.scope().find_local(name).unwrap();
             if binding.is_var_type() {
                 diags.push(Diagnostic::new(
@@ -167,7 +165,7 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<PredicateDecl<'ast>>
         let mut diags = vec![];
         let ins = self.bind_and_push(decl, &mut diags);
 
-        let mut block_tc = BlockTypeChecker::new(self.source_name, &mut self.ctx, false, false);
+        let mut block_tc = BlockTypeChecker::new(self.source_name, self.ctx, false, false);
         let body = decl.body().accept(&mut block_tc)?;
 
         // Check that the last statement is a return and no other statement is.

@@ -1,7 +1,7 @@
 use crate::{
     ast::{
-        BinaryOp, Block, Expression, Identifier, Span, Spanned as _, Statement, UnaryOp,
-        Visitable as _, Visitor,
+        BinaryOp, Block, Expression, Span, Spanned as _, Statement, UnaryOp, Visitable as _,
+        Visitor,
     },
     diagnostic::Diagnostic,
     type_analysis::{
@@ -46,10 +46,8 @@ impl<'ctx, 'ast, T: TypeSystem> BlockTypeChecker<'ctx, 'ast, T> {
     ) {
         let expected = op.expected_type(self.ctx.ts());
 
-        for expr in [left, right] {
-            if let Some(expr) = expr {
-                self.ctx.add_constraint(expected.clone(), expr.r#type());
-            }
+        for expr in [left, right].into_iter().flatten() {
+            self.ctx.add_constraint(expected.clone(), expr.r#type());
         }
 
         extract_result(

@@ -1,10 +1,7 @@
 use std::collections::HashMap;
 
-use crate::{
-    diagnostic::Diagnostic,
-    type_analysis::{
-        FnTypeProperties, TypeProperties, TypeSystem, error::TypeAnalysisError, scope::ScopeStack,
-    },
+use crate::type_analysis::{
+    FnTypeProperties, TypeProperties, TypeSystem, error::TypeAnalysisError, scope::ScopeStack,
 };
 
 pub(super) type Subst<T> =
@@ -193,6 +190,8 @@ impl<T> Constraint<T> {
 
 #[cfg(test)]
 mod tests {
+    use std::slice;
+
     use rstest::{fixture, rstest};
 
     use super::*;
@@ -249,8 +248,8 @@ mod tests {
     fn unify_4(mut ctx: Ctx) {
         let var = ctx.ts().fresh_var();
         let b = ctx.ts().bool_type();
-        let lhs = ctx.ts().func_type(&[var], &[b.clone()]);
-        let rhs = ctx.ts().func_type(&[b.clone()], &[b]);
+        let lhs = ctx.ts().func_type(&[var], slice::from_ref(&b));
+        let rhs = ctx.ts().func_type(slice::from_ref(&b.clone()), &[b]);
         ctx.add_constraint(lhs.into(), rhs.into());
         ctx.unify().unwrap();
     }
@@ -269,7 +268,7 @@ mod tests {
     fn unify_fail_2(mut ctx: Ctx) {
         let lhs = ctx.ts().fresh_var();
         let b = ctx.ts().bool_type();
-        let rhs = ctx.ts().func_type(&[lhs.clone()], &[b]);
+        let rhs = ctx.ts().func_type(slice::from_ref(&lhs), &[b]);
         ctx.add_constraint(lhs, rhs.into());
         ctx.unify().unwrap();
     }
@@ -279,7 +278,7 @@ mod tests {
     fn unify_fail_3(mut ctx: Ctx) {
         let rhs = ctx.ts().fresh_var();
         let b = ctx.ts().bool_type();
-        let lhs = ctx.ts().func_type(&[rhs.clone()], &[b]);
+        let lhs = ctx.ts().func_type(slice::from_ref(&rhs), &[b]);
         ctx.add_constraint(lhs.into(), rhs);
         ctx.unify().unwrap();
     }
@@ -294,9 +293,9 @@ mod tests {
         ctx.unify().expect("this one should not fail");
         ctx.add_constraint(lhs, rhs2);
         let _ = ctx.unify().map_err(|errs| {
-            for err in errs {
-                panic!("{err}");
-            }
+            // We expect only one error from this check.
+            assert_eq!(errs.len(), 1);
+            panic!("{}", errs[0]);
         });
     }
 
