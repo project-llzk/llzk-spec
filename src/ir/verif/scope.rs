@@ -5,7 +5,12 @@ use std::collections::HashMap;
 use llzk::prelude::{FuncDefOpRef, OperationLike as _};
 use melior::ir::{BlockLike as _, BlockRef, Module, Operation, OperationRef, Value};
 
-use crate::{ast::Symbol, diagnostic::CompileError, ir::verif::TypedIdentifier};
+use crate::{
+    ast::Symbol,
+    diagnostic::CompileError,
+    ir::verif::TypedIdentifier,
+    type_analysis::scope::{Scope, ScopeStack},
+};
 
 /// Optional tag for annotating scopes.
 #[derive(Debug, Copy, Clone)]
@@ -23,19 +28,14 @@ impl ScopeTag {
     }
 }
 
-/// Entry in the scope stack.
-pub(super) struct Scope<'ast, 'ctx, 'blk> {
+pub(super) struct ScopeData<'ctx, 'blk> {
     /// Current insertion block.
     block: BlockRef<'ctx, 'blk>,
-    /// Binds names to predicates.
-    predicates: HashMap<Symbol<'ast>, FuncDefOpRef<'ctx, 'blk>>,
-    /// Binds local names to SSA values.
-    locals: HashMap<Symbol<'ast>, Value<'ctx, 'blk>>,
     /// Optional tag.
     tag: Option<ScopeTag>,
 }
 
-impl<'ast, 'ctx, 'blk> Scope<'ast, 'ctx, 'blk> {
+impl<'ctx, 'blk> ScopeData<'ctx, 'blk> {
     /// Creates a root scope based on the given module.
     ///
     /// Uses the module's body for insertion.
@@ -48,64 +48,72 @@ impl<'ast, 'ctx, 'blk> Scope<'ast, 'ctx, 'blk> {
 
     /// Creates an untagged scope.
     pub fn new(block: BlockRef<'ctx, 'blk>) -> Self {
-        Self {
-            block,
-            predicates: Default::default(),
-            locals: Default::default(),
-            tag: None,
-        }
+        Self { block, tag: None }
     }
 
     /// Creates a tagged scope.
     pub fn new_with_tag(block: BlockRef<'ctx, 'blk>, tag: ScopeTag) -> Self {
         Self {
             block,
-            predicates: Default::default(),
-            locals: Default::default(),
             tag: Some(tag),
         }
     }
+}
 
-    /// Binds a reference to a `function.def` operation to the given symbol.
-    ///
-    /// The reference must have been inserted somewhere with a lifetime greater or equal to the
-    /// block's lifetime. It could be the block pointed by this scope or a parent block.
-    pub fn bind_predicate(
-        &mut self,
-        name: &TypedIdentifier<'ast, 'ctx>,
-        func_op: FuncDefOpRef<'ctx, 'blk>,
-    ) -> Result<(), CompileError> {
-        if self.predicates.contains_key(&name.symbol()) {
-            return Err(CompileError::Ir(format!(
-                "duplicate predicate '{}'",
-                name.value()
-            )));
-        }
-        self.predicates.insert(name.symbol(), func_op);
-        Ok(())
-    }
+pub type CodegenScopeStack<'ast, 'ctx, 'blk> =
+    ScopeStack<'ast, Value<'ctx, 'blk>, FuncDefOpRef<'ctx, 'blk>, ScopeData<'ctx, 'blk>>;
+pub type CodegenScope<'ast, 'ctx, 'blk> =
+    Scope<'ast, Value<'ctx, 'blk>, FuncDefOpRef<'ctx, 'blk>, ScopeData<'ctx, 'blk>>;
 
-    /// Binds a SSA value to the given symbol.
-    ///
-    /// The SSA value must dominate any future users that point to the symbol.
-    pub fn bind_local(
-        &mut self,
-        name: &TypedIdentifier<'ast, 'ctx>,
-        value: Value<'ctx, 'blk>,
-    ) -> Result<(), CompileError> {
-        if self.locals.contains_key(&name.symbol()) {
-            return Err(CompileError::Ir(format!(
-                "duplicate local '{}'",
-                name.value()
-            )));
-        }
-        self.locals.insert(name.symbol(), value);
-        Ok(())
-    }
+///// Entry in the scope stack.
+//pub(super) struct Scope<'ast, 'ctx, 'blk> {
+//    /// Binds names to predicates.
+//    predicates: HashMap<Symbol<'ast>, FuncDefOpRef<'ctx, 'blk>>,
+//    /// Binds local names to SSA values.
+//    locals: HashMap<Symbol<'ast>, Value<'ctx, 'blk>>,
+//}
+
+impl<'ast, 'ctx, 'blk> CodegenScope<'ast, 'ctx, 'blk> {
+    ///// Binds a reference to a `function.def` operation to the given symbol.
+    /////
+    ///// The reference must have been inserted somewhere with a lifetime greater or equal to the
+    ///// block's lifetime. It could be the block pointed by this scope or a parent block.
+    //pub fn bind_predicate(
+    //    &mut self,
+    //    name: &TypedIdentifier<'ast, 'ctx>,
+    //    func_op: FuncDefOpRef<'ctx, 'blk>,
+    //) -> Result<(), CompileError> {
+    //    if self.predicates.contains_key(&name.symbol()) {
+    //        return Err(CompileError::Ir(format!(
+    //            "duplicate predicate '{}'",
+    //            name.value()
+    //        )));
+    //    }
+    //    self.predicates.insert(name.symbol(), func_op);
+    //    Ok(())
+    //}
+
+    ///// Binds a SSA value to the given symbol.
+    /////
+    ///// The SSA value must dominate any future users that point to the symbol.
+    //pub fn bind_local(
+    //    &mut self,
+    //    name: &TypedIdentifier<'ast, 'ctx>,
+    //    value: Value<'ctx, 'blk>,
+    //) -> Result<(), CompileError> {
+    //    if self.locals.contains_key(&name.symbol()) {
+    //        return Err(CompileError::Ir(format!(
+    //            "duplicate local '{}'",
+    //            name.value()
+    //        )));
+    //    }
+    //    self.locals.insert(name.symbol(), value);
+    //    Ok(())
+    //}
 
     /// Appends the operation into the block.
     pub fn append_operation(&mut self, op: impl Into<Operation<'ctx>>) -> OperationRef<'ctx, 'blk> {
-        self.block.append_operation(op.into())
+        self.payload().block.append_operation(op.into())
     }
 
     /// Appends the operation into the scope using MLIR's SymbolTable API to ensure that the
@@ -122,6 +130,7 @@ impl<'ast, 'ctx, 'blk> Scope<'ast, 'ctx, 'blk> {
         op: impl Into<Operation<'ctx>>,
     ) -> OperationRef<'ctx, 'blk> {
         let parent_op = self
+            .payload()
             .block
             .parent_operation()
             .expect("scope's block has a parent operation");
@@ -144,18 +153,18 @@ impl<'ast, 'ctx, 'blk> Scope<'ast, 'ctx, 'blk> {
         Ok(op_ref.result(0)?.into())
     }
 
-    /// Returns a reference to the predicates namespace.
-    pub fn predicates(&self) -> &HashMap<Symbol<'ast>, FuncDefOpRef<'ctx, 'blk>> {
-        &self.predicates
-    }
-
-    /// Returns a reference to the locals namespace.
-    pub fn locals(&self) -> &HashMap<Symbol<'ast>, Value<'ctx, 'blk>> {
-        &self.locals
-    }
+    ///// Returns a reference to the predicates namespace.
+    //pub fn predicates(&self) -> &HashMap<Symbol<'ast>, FuncDefOpRef<'ctx, 'blk>> {
+    //    &self.predicates
+    //}
+    //
+    ///// Returns a reference to the locals namespace.
+    //pub fn locals(&self) -> &HashMap<Symbol<'ast>, Value<'ctx, 'blk>> {
+    //    &self.locals
+    //}
 
     /// Returns the tag of the scope, if available.
     pub fn tag(&self) -> Option<ScopeTag> {
-        self.tag
+        self.payload().tag
     }
 }

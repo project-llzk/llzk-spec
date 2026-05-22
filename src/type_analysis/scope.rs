@@ -10,38 +10,38 @@ use crate::{
 };
 
 /// Stack of lexical scopes used during type-checking.
-pub(super) struct ScopeStack<'ast, L, F> {
-    root: Scope<'ast, L, F>,
-    scopes: Vec<Scope<'ast, L, F>>,
+pub struct ScopeStack<'ast, L, F, P = ()> {
+    root: Scope<'ast, L, F, P>,
+    scopes: Vec<Scope<'ast, L, F, P>>,
 }
 
-impl<'ast, L, F> ScopeStack<'ast, L, F> {
+impl<'ast, L, F, P> ScopeStack<'ast, L, F, P> {
     /// Creates a ready to use stack of scopes with a root scope.
     ///
     /// There is no need of pushing a scope before using the stack.
-    pub fn new() -> Self {
+    pub fn new(root_payload: P) -> Self {
         Self {
-            root: Scope::new(true),
+            root: Scope::new(true, root_payload),
             scopes: vec![],
         }
     }
 
     /// Returns a reference to the top of the stack.
-    pub fn top(&mut self) -> &mut Scope<'ast, L, F> {
+    pub fn top(&mut self) -> &mut Scope<'ast, L, F, P> {
         self.scopes.last_mut().unwrap_or(&mut self.root)
     }
 
     /// Pushes a new scope.
-    pub fn push(&mut self) {
-        self.scopes.push(Scope::new(false))
+    pub fn push(&mut self, payload: P) {
+        self.scopes.push(Scope::new(false, payload))
     }
 
     /// Pushes a new scope that is tagged as a local limit.
     ///
     /// Scopes tagged as local limits act as barriers when looking up local bindings, hiding any
     /// locals beyond the limit from the lookup.
-    pub fn push_local_limit(&mut self) {
-        self.scopes.push(Scope::new(true))
+    pub fn push_local_limit(&mut self, payload: P) {
+        self.scopes.push(Scope::new(true, payload))
     }
 
     /// Pops the top scope.
@@ -50,41 +50,53 @@ impl<'ast, L, F> ScopeStack<'ast, L, F> {
     }
 
     /// Looks for a local binding with the given identifier.
-    pub fn find_local(&self, name: &Identifier<'ast>) -> Result<&L, TypeAnalysisError> {
+    pub fn find_local<M>(&self, name: &Identifier<'ast, M>) -> Result<&L, TypeAnalysisError> {
         self.ordered_local_scopes()
             // Fetch the closest binding
             .find_map(|scope| scope.locals.get(&name.symbol()))
             .ok_or_else(|| TypeAnalysisError::UnknownLocal(name.value().to_owned()))
     }
 
+    /// Looks for a local binding with the given parameter number.
+    pub fn find_parameter(&self, param_no: &usize) -> Result<&L, TypeAnalysisError> {
+        self.ordered_local_scopes()
+            // Fetch the closest binding
+            .find_map(|scope| {
+                let sym = scope.params.get(param_no)?;
+                scope.locals.get(&sym)
+            })
+            .ok_or_else(|| TypeAnalysisError::UnknownLocal(format!("argument #{param_no}")))
+    }
+
     /// Looks for a predicate definition with the given identifier.
-    pub fn find_predicate(&self, name: &Identifier<'ast>) -> Result<&F, TypeAnalysisError> {
+    pub fn find_predicate<M>(&self, name: &Identifier<'ast, M>) -> Result<&F, TypeAnalysisError> {
         self.ordered_scopes()
             .find_map(|scope| scope.predicates.get(&name.symbol()))
             .ok_or_else(|| TypeAnalysisError::UnknownPredicate(name.value().to_owned()))
     }
 
     /// Returns an iterator of the scopes in stack order top to bottom.
-    fn ordered_scopes(&self) -> impl Iterator<Item = &Scope<'ast, L, F>> {
+    pub fn ordered_scopes(&self) -> impl Iterator<Item = &Scope<'ast, L, F, P>> {
         self.scopes.iter().rev().chain([&self.root])
     }
 
     /// Returns an iterator of the scopes in stack order top to bottom until a local limit is
     /// reached.
-    fn ordered_local_scopes(&self) -> impl Iterator<Item = &Scope<'ast, L, F>> {
+    pub fn ordered_local_scopes(&self) -> impl Iterator<Item = &Scope<'ast, L, F, P>> {
         struct Iter<I> {
             it: I,
             limit_reached: bool,
         }
 
-        impl<'s, 'ast, L, F, I> Iterator for Iter<I>
+        impl<'s, 'ast, L, F, P, I> Iterator for Iter<I>
         where
-            I: Iterator<Item = &'s Scope<'ast, L, F>>,
+            I: Iterator<Item = &'s Scope<'ast, L, F, P>>,
             'ast: 's,
             L: 's,
             F: 's,
+            P: 's,
         {
-            type Item = &'s Scope<'ast, L, F>;
+            type Item = &'s Scope<'ast, L, F, P>;
 
             fn next(&mut self) -> Option<Self::Item> {
                 if self.limit_reached {
@@ -103,10 +115,24 @@ impl<'ast, L, F> ScopeStack<'ast, L, F> {
     }
 
     /// Returns an iterator of mutable references to the scopes in stack order top to bottom.
-    fn ordered_scopes_mut(&mut self) -> impl Iterator<Item = &mut Scope<'ast, L, F>> {
+    pub fn ordered_scopes_mut(&mut self) -> impl Iterator<Item = &mut Scope<'ast, L, F, P>> {
         self.scopes.iter_mut().rev().chain([&mut self.root])
     }
 
+    /// Returns an iterator of mutable references to all the type bindings of locals.
+    fn all_local_types(&mut self) -> impl Iterator<Item = &mut L> {
+        self.ordered_scopes_mut()
+            .flat_map(|scope| scope.locals.values_mut())
+    }
+
+    /// Returns an iterator of mutable references to all the type bindings of predicates.
+    fn all_predicate_types(&mut self) -> impl Iterator<Item = &mut F> {
+        self.ordered_scopes_mut()
+            .flat_map(|scope| scope.predicates.values_mut())
+    }
+}
+
+impl<'ast, L, F> ScopeStack<'ast, L, F, ()> {
     /// Propagates resolved types across type variables binded in the scope.
     pub fn propagate<T>(&mut self, subst: &Subst<T>, ts: &mut T)
     where
@@ -148,21 +174,9 @@ impl<'ast, L, F> ScopeStack<'ast, L, F> {
             Some(())
         }
     }
-
-    /// Returns an iterator of mutable references to all the type bindings of locals.
-    fn all_local_types(&mut self) -> impl Iterator<Item = &mut L> {
-        self.ordered_scopes_mut()
-            .flat_map(|scope| scope.locals.values_mut())
-    }
-
-    /// Returns an iterator of mutable references to all the type bindings of predicates.
-    fn all_predicate_types(&mut self) -> impl Iterator<Item = &mut F> {
-        self.ordered_scopes_mut()
-            .flat_map(|scope| scope.predicates.values_mut())
-    }
 }
 
-impl<L, F> std::fmt::Debug for ScopeStack<'_, L, F>
+impl<L, F, P> std::fmt::Debug for ScopeStack<'_, L, F, P>
 where
     L: std::fmt::Display,
     F: std::fmt::Display,
@@ -178,29 +192,35 @@ where
 }
 
 /// Entry in the scope stack.
-pub(super) struct Scope<'ast, L, F> {
-    // Binds names to predicates.
+pub struct Scope<'ast, L, F, P> {
+    /// Binds names to predicates.
     predicates: HashMap<Symbol<'ast>, F>,
-    // Binds local names to SSA values.
+    /// Binds local names to SSA values.
     locals: HashMap<Symbol<'ast>, L>,
-    // Indicates wether this scope entry limits the access to the locals defined in outer scopes.
+    /// Maps argument numbers to local symbols at this scope level.
+    params: HashMap<usize, Symbol<'ast>>,
+    /// Indicates wether this scope entry limits the access to the locals defined in outer scopes.
     local_limit: bool,
+    /// Additional payload used by the scope.
+    payload: P,
 }
 
-impl<'ast, L, F> Scope<'ast, L, F> {
+impl<'ast, L, F, P> Scope<'ast, L, F, P> {
     /// Creates a new scope.
-    fn new(local_limit: bool) -> Self {
+    fn new(local_limit: bool, payload: P) -> Self {
         Self {
             predicates: Default::default(),
             locals: Default::default(),
+            params: Default::default(),
             local_limit,
+            payload,
         }
     }
 
     /// Binds the given value to a name in the predicates namespace.
-    pub fn bind_predicate(
+    pub fn bind_predicate<M>(
         &mut self,
-        name: &Identifier<'ast>,
+        name: &Identifier<'ast, M>,
         f: F,
     ) -> Result<(), TypeAnalysisError> {
         if self.predicates.contains_key(&name.symbol()) {
@@ -213,16 +233,51 @@ impl<'ast, L, F> Scope<'ast, L, F> {
     }
 
     /// Binds the given value to a name in the locals namespace.
-    pub fn bind_local(&mut self, name: &Identifier<'ast>, l: L) -> Result<(), TypeAnalysisError> {
+    pub fn bind_local<M>(
+        &mut self,
+        name: &Identifier<'ast, M>,
+        l: L,
+    ) -> Result<(), TypeAnalysisError> {
         if self.locals.contains_key(&name.symbol()) {
             return Err(TypeAnalysisError::DuplicateLocal(name.value().to_owned()));
         }
-        self.locals.insert(name.symbol(), l);
+        self.locals.insert(name.symbol(), l.into());
         Ok(())
+    }
+
+    /// Binds the given value to a parameter name in the locals namespace.
+    pub fn bind_parameter<M>(
+        &mut self,
+        name: &Identifier<'ast, M>,
+        l: L,
+        param_no: usize,
+    ) -> Result<(), TypeAnalysisError> {
+        if self.locals.contains_key(&name.symbol()) || self.params.contains_key(&param_no) {
+            return Err(TypeAnalysisError::DuplicateLocal(name.value().to_owned()));
+        }
+        self.locals.insert(name.symbol(), l.into());
+        self.params.insert(param_no, name.symbol());
+        Ok(())
+    }
+
+    pub fn payload(&self) -> &P {
+        &self.payload
+    }
+
+    pub fn payload_mut(&mut self) -> &mut P {
+        &mut self.payload
+    }
+
+    pub fn predicates(&self) -> &HashMap<Symbol<'ast>, F> {
+        &self.predicates
+    }
+
+    pub fn locals(&self) -> &HashMap<Symbol<'ast>, L> {
+        &self.locals
     }
 }
 
-impl<L, F> std::fmt::Debug for Scope<'_, L, F>
+impl<L, F, P> std::fmt::Debug for Scope<'_, L, F, P>
 where
     L: std::fmt::Display,
     F: std::fmt::Display,
@@ -245,7 +300,7 @@ mod tests {
 
     use super::*;
 
-    type Scopes<'ast> = ScopeStack<'ast, usize, usize>;
+    type Scopes<'ast> = ScopeStack<'ast, usize, usize, ()>;
 
     fn ctx() -> AstContext {
         AstContext::new()
@@ -260,13 +315,13 @@ mod tests {
         let ctx = ctx();
         let x = ident(&ctx, "x");
         let y = ident(&ctx, "y");
-        let mut stack = Scopes::new();
+        let mut stack = Scopes::new(());
 
         // Test that 'x' can be accessed but 'y' cannot
         // when 'x' is within the limit and 'y' is outside.
         stack.top().bind_local(&y, 1).unwrap();
-        stack.push_local_limit();
-        stack.push();
+        stack.push_local_limit(());
+        stack.push(());
         stack.top().bind_local(&x, 2).unwrap();
 
         assert_eq!(stack.find_local(&x), Ok(&2));
@@ -281,12 +336,12 @@ mod tests {
         let ctx = ctx();
         let x = ident(&ctx, "x");
         let y = ident(&ctx, "y");
-        let mut stack = Scopes::new();
+        let mut stack = Scopes::new(());
 
         // Test that 'x' can be accessed but 'y' cannot
         // when 'x' is right at the limit and 'y' is outside.
         stack.top().bind_local(&y, 1).unwrap();
-        stack.push_local_limit();
+        stack.push_local_limit(());
         stack.top().bind_local(&x, 2).unwrap();
 
         assert_eq!(stack.find_local(&x), Ok(&2));
@@ -300,11 +355,11 @@ mod tests {
     fn test_shadowing() {
         let ctx = ctx();
         let x = ident(&ctx, "x");
-        let mut stack = Scopes::new();
+        let mut stack = Scopes::new(());
 
         // Test that when accesing 'x' we get the closest result back.
         stack.top().bind_local(&x, 1).unwrap();
-        stack.push();
+        stack.push(());
         stack.top().bind_local(&x, 2).unwrap();
 
         assert_eq!(stack.find_local(&x), Ok(&2));

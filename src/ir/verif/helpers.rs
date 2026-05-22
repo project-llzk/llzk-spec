@@ -17,7 +17,8 @@ use crate::{
     ast::{Span, Spanned as _, Visitable, Visitor},
     diagnostic::CompileError,
     ir::verif::{
-        Scope, SpecCodegen, TypedExpression, TypedIdentifier, TypedPredicateDecl, scope::ScopeTag,
+        SpecCodegen, TypedExpression, TypedIdentifier, TypedPredicateDecl,
+        scope::{CodegenScope, ScopeData, ScopeTag},
     },
 };
 
@@ -41,16 +42,23 @@ impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
         self.push_tagged(block, ScopeTag::Predicate);
 
         // Bind the formals to their block arguments.
-        decl.params()
-            .iter()
-            .enumerate()
-            .map(|(n, formal)| -> Result<(_, Value), CompileError> {
-                Ok((formal, block.argument(n)?.into()))
-            })
-            .try_for_each(|r| {
-                let (name, value) = r?;
-                self.top_mut().bind_local(name, value)
-            })
+        for (index, formal) in decl.params().iter().enumerate() {
+            let value = block.argument(index)?;
+            self.top_mut()
+                .bind_parameter(formal, value.into(), index)
+                .map_err(|err| {
+                    err.into_compile_error(
+                        &self.filename,
+                        Some(decl.span()),
+                        format!(
+                            "on parameter #{index} '{}' of predicate '{}'",
+                            formal.value(),
+                            decl.name().value()
+                        ),
+                    )
+                })?;
+        }
+        Ok(())
     }
 
     /// Binds a predicate into the top of the stack. However, the actual operation is inserted on
@@ -67,13 +75,20 @@ impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
         // Append the operation into the correct scope.
         let scope = self
             .scope
-            .iter_mut()
-            .rev()
+            .ordered_scopes_mut()
             .find(|scope| scope.tag().is_some_and(ScopeTag::accepts_function_def_ops))
             .unwrap();
         let op_ref = scope.append_with_symbol_uniquing(func_op);
         // But bind it in the top of the stack.
-        self.top_mut().bind_predicate(name, op_ref.try_into()?)?;
+        self.top_mut()
+            .bind_predicate(name, op_ref.try_into()?)
+            .map_err(|err| {
+                err.into_compile_error(
+                    &self.filename,
+                    Some(name.span()),
+                    format!("on declaration of predicate '{}'", name.value()),
+                )
+            })?;
         Ok(op_ref.try_into()?)
     }
 
@@ -88,22 +103,22 @@ impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
     }
 
     /// Returns a mutable reference to the top of the scope stack.
-    pub fn top_mut(&mut self) -> &mut Scope<'ast, 'ctx, 'blk> {
-        self.scope.last_mut().unwrap()
+    pub fn top_mut(&mut self) -> &mut CodegenScope<'ast, 'ctx, 'blk> {
+        self.scope.top()
     }
 
     /// Pushes a new, untagged, scope.
     ///
     /// For pushing tagged scopes see [`Self::push_tagged`].
     pub fn push(&mut self, block: BlockRef<'ctx, 'blk>) {
-        self.scope.push(Scope::new(block))
+        self.scope.push(ScopeData::new(block))
     }
 
     /// Pushes a new tagged scope.
     ///
     /// For pushing without a tag see [`Self::push`].
     pub fn push_tagged(&mut self, block: BlockRef<'ctx, 'blk>, tag: ScopeTag) {
-        self.scope.push(Scope::new_with_tag(block, tag))
+        self.scope.push(ScopeData::new_with_tag(block, tag))
     }
 
     /// Pops the top of the scope stack.
@@ -158,12 +173,11 @@ impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
     /// otherwise.
     pub fn find_in_scope<R>(
         &self,
-        find_cb: impl FnMut(&Scope<'ast, 'ctx, 'blk>) -> Option<R>,
+        find_cb: impl FnMut(&CodegenScope<'ast, 'ctx, 'blk>) -> Option<R>,
         on_error: impl FnOnce() -> CompileError,
     ) -> Result<R, CompileError> {
         self.scope
-            .iter()
-            .rev()
+            .ordered_scopes()
             .find_map(find_cb)
             .ok_or_else(on_error)
     }

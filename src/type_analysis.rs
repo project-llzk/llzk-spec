@@ -15,7 +15,7 @@ mod ctx;
 mod error;
 mod helpers;
 mod predicate;
-mod scope;
+pub mod scope;
 
 type TypingResult<T> = Result<T, Vec<Diagnostic>>;
 

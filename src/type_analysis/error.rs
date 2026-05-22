@@ -1,4 +1,7 @@
-use crate::{ast::Span, diagnostic::Diagnostic};
+use crate::{
+    ast::Span,
+    diagnostic::{CompileError, Diagnostic},
+};
 use thiserror::Error;
 
 /// Top-level compilation error categories.
@@ -31,5 +34,15 @@ impl TypeAnalysisError {
             format!("{context}: {self}"),
             span,
         )]
+    }
+
+    /// Converts the error into a general compilation error.
+    pub fn into_compile_error(
+        self,
+        source_name: &str,
+        span: Option<Span>,
+        context: impl std::fmt::Display,
+    ) -> CompileError {
+        CompileError::Diagnostics(self.into_diags(source_name, span, context).into())
     }
 }

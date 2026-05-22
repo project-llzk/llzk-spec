@@ -20,7 +20,7 @@ use crate::{
         Context, MlirTypeSystem,
         verif::{
             helpers::accept_in_new_scope,
-            scope::{Scope, ScopeTag},
+            scope::{CodegenScope, CodegenScopeStack, ScopeData, ScopeTag},
         },
     },
     type_analysis::TypeChecker,
@@ -61,7 +61,7 @@ pub fn emit_on_empty_module<'ctx>(
 /// Code generator of specifications.
 struct SpecCodegen<'ast, 'ctx, 'blk> {
     ctx: &'ctx Context,
-    scope: Vec<Scope<'ast, 'ctx, 'blk>>,
+    scope: CodegenScopeStack<'ast, 'ctx, 'blk>,
     filename: String,
     builder: OpBuilder<'ctx>,
 }
@@ -74,7 +74,7 @@ where
     fn new(ctx: &'ctx Context, module: &'blk Module<'ctx>, filename: String) -> Self {
         Self {
             ctx,
-            scope: vec![Scope::root(module)],
+            scope: CodegenScopeStack::new(ScopeData::root(module)),
             filename,
             builder: OpBuilder::new(&ctx.context),
         }
@@ -176,9 +176,13 @@ impl<'ast, 'ctx> ast::Visitor<TypedStatement<'ast, 'ctx>> for SpecCodegen<'ast, 
                 ScopeTag::Predicate => stmt_not_allowed!("ensure", "predicates"),
                 _ => todo!("ensure statement is not supported yet"),
             },
-            Let { name, value, .. } => {
+            Let {
+                name, value, span, ..
+            } => {
                 let value = value.accept(self)?;
-                self.top_mut().bind_local(name, value)
+                self.top_mut().bind_local(name, value).map_err(|err| {
+                    err.into_compile_error(&self.filename, Some(*span), "on let statement")
+                })
             }
             Unused { .. } => match self.closest_tag() {
                 ScopeTag::Predicate => stmt_not_allowed!("unused", "predicates"),

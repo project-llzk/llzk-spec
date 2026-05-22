@@ -20,7 +20,7 @@ impl<'ast, T: TypeSystem> TypeInferenceCtx<'ast, T> {
     /// Creates a new context using the given type system.
     pub fn new(ts: T) -> Self {
         Self {
-            scope: ScopeStack::new(),
+            scope: ScopeStack::new(()),
             constraints: Default::default(),
             ts,
             subst: Default::default(),
@@ -216,7 +216,7 @@ mod tests {
     #[fixture]
     fn ctx<'ast>() -> Ctx<'ast> {
         TypeInferenceCtx {
-            scope: ScopeStack::new(),
+            scope: ScopeStack::new(()),
             constraints: vec![],
             ts: MockTypeSystem::default(),
             subst: Default::default(),
@@ -339,7 +339,7 @@ mod tests {
         let lhs = ctx.ts().fresh_var();
         let rhs = ctx.ts().bool_type();
 
-        ctx.scope().push(); // Push because the root scope does not allow locals.
+        ctx.scope().push(()); // Push because the root scope does not allow locals.
         ctx.scope().top().bind_local(&name, lhs.clone()).unwrap();
         // Before unification the local binds to the var type.
         assert_eq!(*ctx.scope().find_local(&name).unwrap(), lhs);
@@ -362,7 +362,7 @@ mod tests {
         let other = ctx.ts().fresh_var();
         let rhs = ctx.ts().bool_type();
 
-        ctx.scope().push(); // Push because the root scope does not allow locals.
+        ctx.scope().push(()); // Push because the root scope does not allow locals.
         ctx.scope().top().bind_local(&name, other.clone()).unwrap();
         // Before unification the local binds to the var type.
         assert_eq!(*ctx.scope().find_local(&name).unwrap(), other);

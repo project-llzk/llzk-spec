@@ -134,7 +134,7 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Statement<'ast>> for BlockTypeChecker<'c
                 }
             }
             Statement::Block(block) => {
-                self.ctx.scope().push();
+                self.ctx.scope().push(());
                 let new = block.accept(self).map(Statement::Block);
                 self.ctx.scope().pop();
                 new
@@ -308,7 +308,7 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Expression<'ast>> for BlockTypeChecker<'
                 let bool_type = self.ctx.ts().bool_type();
                 let mut diags = vec![];
                 // Process arguments.
-                let mut new_args = vec![];
+                let mut new_args = Vec::with_capacity(args.len());
                 for arg in args {
                     let arg = extract_result(arg.accept(self), &mut diags);
                     new_args.push(arg);
@@ -380,7 +380,25 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Expression<'ast>> for BlockTypeChecker<'
             Expression::Quantifier { .. } => todo!(),
             Expression::Len { .. } => todo!(),
             Expression::Old { .. } => todo!(),
-            Expression::Arg { .. } => todo!(),
+            Expression::Arg { index, span, .. } => {
+                let t = self
+                    .ctx
+                    .scope()
+                    .find_parameter(index)
+                    .cloned()
+                    .map_err(|err| {
+                        err.into_diags(
+                            self.source_name,
+                            Some(*span),
+                            format!("on argument #{index}"),
+                        )
+                    })?;
+                Ok(Expression::Arg {
+                    index: *index,
+                    span: *span,
+                    meta: t,
+                })
+            }
             Expression::Nondet { span, .. } => Ok(Expression::Nondet {
                 span: *span,
                 meta: self.ctx.ts().felt_type(),
