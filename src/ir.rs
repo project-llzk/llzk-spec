@@ -165,6 +165,14 @@ impl<'ctx> TypeProperties for Type<'ctx> {
     fn to_array_type(&self) -> Option<Self::ArrayType> {
         ArrayType::try_from(*self).ok()
     }
+
+    fn can_resolve_unification(&self, other: &Self) -> bool {
+        // Special case for pairs of 'index' and '!felt.type'
+        if (self.is_index() && is_felt_type(*other)) || (is_felt_type(*self) && other.is_index()) {
+            return true;
+        }
+        types_unify(*self, *other)
+    }
 }
 
 impl<'ctx> ArrayTypeProperties for ArrayType<'ctx> {

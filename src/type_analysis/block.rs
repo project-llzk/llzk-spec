@@ -6,6 +6,7 @@ use crate::{
         ctx::TypeInferenceCtx,
         expression::{ExpressionTypeChecker, ExpressionTypeCheckerCfg},
         helpers::{check_many, extract_result},
+        invariant::InvariantTypeChecker,
         predicate::PredicateTypeChecker,
     },
 };
@@ -338,8 +339,9 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Statement<'ast>> for BlockTypeChecker<'c
                     Some(decl.span()),
                 )])
             }
-            Statement::Invariant(_) => {
-                todo!()
+            Statement::Invariant(decl) => {
+                let mut inv_tc = InvariantTypeChecker::new(self.ctx, self.source_name);
+                decl.accept(&mut inv_tc).map(Statement::Invariant)
             }
 
             Statement::Predicate(decl) => {

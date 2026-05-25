@@ -4,7 +4,10 @@
 //! In future iterations, we will add functionality to emit `verif` dialect IR,
 //! either combined with the LLZK IR or in a separate file.
 
+use crate::ast::Identifier;
 use crate::diagnostic::CompileError;
+use crate::ir::MlirTypeSystem;
+use crate::type_analysis::{CircuitInfo, MemberInfo, ParamInfo, StructInfo};
 use llzk::context::LlzkContext;
 use llzk::dialect::{
     array::ArrayType,
@@ -13,7 +16,11 @@ use llzk::dialect::{
     r#struct::{MemberDefOpLike, StructDefOpLike, StructType, is_struct_def},
 };
 use llzk::operation::WalkOperationMutLike;
-use llzk::prelude::{FuncDefOpRefMut, PodType, StructDefOpRef, TemplateOpLike};
+use llzk::prelude::{
+    FuncDefOpRef, FuncDefOpRefMut, PodType, StructDefOpRef, TemplateOpLike, TemplateOpRef,
+    TemplateSymbolBindingOpLike as _,
+};
+use melior::ir::{BlockLike, RegionLike, TypeLike as _, ValueLike};
 use melior::{
     dialect::DialectRegistry,
     ir::{
@@ -26,6 +33,125 @@ use melior::{
 };
 use mlir_sys::mlirOperationGetParentOperation;
 use std::collections::{HashMap, HashSet};
+
+mod error;
+
+/// Implementation of [`CircuitInfo`] for LLZK circuits.
+#[derive(Copy, Clone)]
+pub struct LlzkInfo<'ctx, 'm> {
+    /// The MLIR module that defines the LLZK circuit.
+    module: &'m Module<'ctx>,
+}
+
+impl<'ctx, 'm> LlzkInfo<'ctx, 'm> {
+    /// Creates a new info provider.
+    pub fn new(module: &'m Module<'ctx>) -> Self {
+        Self { module }
+    }
+}
+
+impl<'ctx> CircuitInfo<'ctx> for LlzkInfo<'ctx, '_> {
+    type Error = error::Error;
+
+    type TypeSystem = MlirTypeSystem<'ctx>;
+
+    fn find_struct(
+        &self,
+        name: &Identifier,
+    ) -> Result<impl StructInfo<'ctx, TypeSystem = Self::TypeSystem>, Self::Error> {
+        let mut result = None;
+        self.module
+            .as_operation()
+            .walk(WalkOrder::PreOrder, |operation| {
+                if let Some(struct_op) = StructDefOpRef::from_option_raw(operation.to_raw()) {
+                    let fqn =
+                        struct_contract_target_name(&struct_op, StructDefOpLike::name(&struct_op));
+                    if fqn == name.value() {
+                        result = Some(LlzkStructInfo::Struct(struct_op));
+                        return WalkResult::Interrupt;
+                    } else {
+                        // Don't walk inside the operation since there isn't anything interesting to
+                        // look at.
+                        return WalkResult::Skip;
+                    }
+                }
+
+                if let Some(func_op) = FuncDefOpRef::from_option_raw(operation.to_raw()) {
+                    let fqn = StringAttribute::try_from(func_op.fully_qualified_name()).unwrap();
+                    if fqn.value() == name.value() {
+                        result = Some(LlzkStructInfo::Function(func_op));
+                        return WalkResult::Interrupt;
+                    } else {
+                        // Don't walk inside the operation since there isn't anything interesting to
+                        // look at.
+                        return WalkResult::Skip;
+                    }
+                }
+
+                WalkResult::Advance
+            });
+
+        result.ok_or_else(|| error::Error::StructNotFound(name.value().to_owned()))
+    }
+}
+
+/// Implementation of [`StructInfo`] for LLZK structs and functions.
+enum LlzkStructInfo<'ctx, 'op> {
+    Struct(StructDefOpRef<'ctx, 'op>),
+    Function(FuncDefOpRef<'ctx, 'op>),
+}
+
+impl<'ctx> StructInfo<'ctx> for LlzkStructInfo<'ctx, '_> {
+    type TypeSystem = MlirTypeSystem<'ctx>;
+
+    fn inputs(&self) -> impl Iterator<Item = Type<'ctx>> {
+        let f = match self {
+            LlzkStructInfo::Struct(op) => op.get_compute_func(),
+            LlzkStructInfo::Function(op) => Some(*op),
+        }
+        .unwrap();
+        let arg_count = f
+            .region(0)
+            .unwrap()
+            .first_block()
+            .map(|block| block.argument_count())
+            .unwrap_or_default();
+        (0..arg_count)
+            .map(move |n| unsafe { Type::from_raw(f.argument(n).unwrap().r#type().to_raw()) })
+    }
+
+    fn members(&self) -> impl Iterator<Item = MemberInfo<'ctx, Type<'ctx>>> {
+        match self {
+            LlzkStructInfo::Struct(op) => Some(op),
+            LlzkStructInfo::Function(_) => None,
+        }
+        .into_iter()
+        .flat_map(|op| op.get_member_defs())
+        .map(move |m| {
+            MemberInfo::new(
+                m.member_name(),
+                unsafe { Type::from_raw(m.member_type().to_raw()) },
+                m.has_public_attr(),
+            )
+        })
+    }
+
+    fn template_params(&self) -> impl Iterator<Item = ParamInfo<'ctx, Type<'ctx>>> {
+        match self {
+            LlzkStructInfo::Struct(op) => op.parent_operation(),
+            LlzkStructInfo::Function(op) => op.parent_operation(),
+        }
+        .into_iter()
+        .filter_map(|op| TemplateOpRef::try_from(op).ok())
+        .flat_map(|op| op.const_binding_ops())
+        .map(|op| {
+            ParamInfo::new(
+                op.sym_name(),
+                op.type_opt().map(|t| unsafe { Type::from_raw(t.to_raw()) }),
+            )
+        })
+    }
+}
 
 /// Kind of loop operation discovered in LLZK IR.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

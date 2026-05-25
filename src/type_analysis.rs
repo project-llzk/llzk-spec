@@ -1,7 +1,9 @@
 //! Type analysis of the AST.
 
+use std::marker::PhantomData;
+
 use crate::{
-    ast::{Document, Item, Spanned as _, Visitable, Visitor},
+    ast::{AstContext, Document, Identifier, Item, Spanned as _, Visitable, Visitor},
     diagnostic::{CompileError, Diagnostic},
     type_analysis::{
         contract::ContractTypeChecker, ctx::TypeInferenceCtx, helpers::check_many,
@@ -15,39 +17,58 @@ mod ctx;
 mod error;
 mod expression;
 mod helpers;
+mod invariant;
 mod predicate;
 pub mod scope;
 
 type TypingResult<T> = Result<T, Vec<Diagnostic>>;
 
-pub struct TypeChecker<'ast, T: TypeSystem> {
+pub struct TypeChecker<'ast, 'info, 'c, T, C>
+where
+    T: TypeSystem,
+    C: CircuitInfo<'c, TypeSystem = T>,
+{
     ctx: TypeInferenceCtx<'ast, T>,
+    info: &'info C,
     source_name: &'ast str,
+    _marker: PhantomData<&'c ()>,
 }
 
-impl<'ast, T: TypeSystem> TypeChecker<'ast, T> {
+impl<'ast, 'info, 'c, T, C> TypeChecker<'ast, 'info, 'c, T, C>
+where
+    T: TypeSystem,
+    C: CircuitInfo<'c, TypeSystem = T>,
+{
     /// Creates a new type checker.
-    fn new(ts: T, source_name: &'ast str) -> Self {
+    fn new(ts: T, info: &'info C, ast: &'ast AstContext, source_name: &'ast str) -> Self {
         Self {
-            ctx: TypeInferenceCtx::new(ts),
+            ctx: TypeInferenceCtx::new(ts, ast),
+            info,
             source_name,
+            _marker: PhantomData,
         }
     }
 
     /// Typechecks the document using the provided type system.
     pub fn check(
         ts: T,
+        info: &'info C,
+        ast: &'ast AstContext,
         source_name: &'ast str,
         document: &Document<'ast>,
     ) -> Result<Document<'ast, T::Type>, CompileError> {
-        let mut checker = Self::new(ts, source_name);
+        let mut checker = Self::new(ts, info, ast, source_name);
         document
             .accept(&mut checker)
             .map_err(|diags| CompileError::Diagnostics(diags.into()))
     }
 }
 
-impl<'ast, T: TypeSystem> Visitor<Document<'ast>> for TypeChecker<'ast, T> {
+impl<'ast, 'c, T, C> Visitor<Document<'ast>> for TypeChecker<'ast, '_, 'c, T, C>
+where
+    T: TypeSystem,
+    C: CircuitInfo<'c, TypeSystem = T>,
+{
     type Output = TypingResult<Document<'ast, T::Type>>;
 
     fn visit(&mut self, document: &Document<'ast>) -> Self::Output {
@@ -57,7 +78,11 @@ impl<'ast, T: TypeSystem> Visitor<Document<'ast>> for TypeChecker<'ast, T> {
     }
 }
 
-impl<'ast, T: TypeSystem> Visitor<Item<'ast>> for TypeChecker<'ast, T> {
+impl<'ast, 'c, T, C> Visitor<Item<'ast>> for TypeChecker<'ast, '_, 'c, T, C>
+where
+    T: TypeSystem,
+    C: CircuitInfo<'c, TypeSystem = T>,
+{
     type Output = TypingResult<Item<'ast, T::Type>>;
 
     fn visit(&mut self, entity: &Item<'ast>) -> Self::Output {
@@ -65,6 +90,7 @@ impl<'ast, T: TypeSystem> Visitor<Item<'ast>> for TypeChecker<'ast, T> {
             Item::Contract(decl) => decl
                 .accept(&mut ContractTypeChecker::new(
                     &mut self.ctx,
+                    self.info,
                     self.source_name,
                 ))
                 .map(Into::into),
@@ -175,6 +201,12 @@ pub trait TypeProperties {
 
     /// Converts the type into the concrete array type representation.
     fn to_array_type(&self) -> Option<Self::ArrayType>;
+
+    /// Return true if the types can resolve their unification.
+    ///
+    /// For example, an 'index' type can be coerced to a '!felt.type' using the cast operation,
+    /// so it returns true for that case.
+    fn can_resolve_unification(&self, other: &Self) -> bool;
 }
 
 /// Trait for obtaining information about array types.
@@ -187,6 +219,73 @@ pub trait ArrayTypeProperties {
 
     /// Returns true if the array has type vars.
     fn contains_type_vars(&self) -> bool;
+}
+
+/// Trait that gives information about the circuit the spec is targeting.
+pub trait CircuitInfo<'info>: Copy {
+    /// Error type.
+    type Error: std::fmt::Display;
+    /// Type system used by the information provider.
+    type TypeSystem: TypeSystem;
+
+    /// Looks up a struct definition by name.
+    fn find_struct(
+        &self,
+        name: &Identifier,
+    ) -> Result<impl StructInfo<'info, TypeSystem = Self::TypeSystem>, Self::Error>;
+}
+
+/// Trait that gives information about a struct in a circuit.
+///
+/// Implementations of this trait should return data that helps build the locals environment when
+/// type-checking a contract's body.
+pub trait StructInfo<'info> {
+    /// Type system used by the information provider.
+    type TypeSystem: TypeSystem;
+
+    /// Returns the list of input arguments of the struct in declaration order.
+    fn inputs(&self) -> impl Iterator<Item = <Self::TypeSystem as TypeSystem>::Type>;
+
+    /// Returns the list of members of the struct.
+    fn members(
+        &self,
+    ) -> impl Iterator<Item = MemberInfo<'info, <Self::TypeSystem as TypeSystem>::Type>>;
+
+    /// Returns the list of template parameters associated with the struct.
+    fn template_params(
+        &self,
+    ) -> impl Iterator<Item = ParamInfo<'info, <Self::TypeSystem as TypeSystem>::Type>>;
+}
+
+/// Information about a struct's member.
+pub struct MemberInfo<'ctx, T> {
+    name: &'ctx str,
+    r#type: T,
+    public: bool,
+}
+
+impl<'ctx, T> MemberInfo<'ctx, T> {
+    /// Creates a new info struct.
+    pub fn new(name: &'ctx str, r#type: T, public: bool) -> Self {
+        Self {
+            name,
+            r#type,
+            public,
+        }
+    }
+}
+
+/// Information about a template parameter.
+pub struct ParamInfo<'ctx, T> {
+    name: &'ctx str,
+    r#type: Option<T>,
+}
+
+impl<'ctx, T> ParamInfo<'ctx, T> {
+    /// Creates a new info struct.
+    pub fn new(name: &'ctx str, r#type: Option<T>) -> Self {
+        Self { name, r#type }
+    }
 }
 
 #[cfg(test)]

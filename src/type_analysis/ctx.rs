@@ -1,7 +1,10 @@
 use std::collections::HashMap;
 
-use crate::type_analysis::{
-    FnTypeProperties, TypeProperties, TypeSystem, error::TypeAnalysisError, scope::ScopeStack,
+use crate::{
+    ast::{AstContext, Symbol},
+    type_analysis::{
+        FnTypeProperties, TypeProperties, TypeSystem, error::TypeAnalysisError, scope::ScopeStack,
+    },
 };
 
 /// Convenience alias for the substitutions mapping between type variable ids and resolved types.
@@ -13,16 +16,18 @@ pub(super) struct TypeInferenceCtx<'ast, T: TypeSystem> {
     scope: ScopeStack<'ast, T::Type, T::FnType>,
     constraints: Vec<Constraint<T::Type>>,
     ts: T,
+    ast: &'ast AstContext,
     subst: Subst<T>,
 }
 
 impl<'ast, T: TypeSystem> TypeInferenceCtx<'ast, T> {
     /// Creates a new context using the given type system.
-    pub fn new(ts: T) -> Self {
+    pub fn new(ts: T, ast: &'ast AstContext) -> Self {
         Self {
             scope: ScopeStack::new(()),
             constraints: Default::default(),
             ts,
+            ast,
             subst: Default::default(),
         }
     }
@@ -69,14 +74,14 @@ impl<'ast, T: TypeSystem> TypeInferenceCtx<'ast, T> {
 
     /// Handles unification of a single constraint.
     fn unify_pair(&mut self, lhs: &T::Type, rhs: &T::Type, errs: &mut Vec<TypeAnalysisError>) {
-        if lhs == rhs {
+        if lhs.can_resolve_unification(&rhs) {
             return;
         }
         let lhs = Self::apply(lhs, &self.subst, &mut self.ts);
         let rhs = Self::apply(rhs, &self.subst, &mut self.ts);
 
-        // Check for equality again after application
-        if lhs == rhs {
+        // Check for unifiablity again after application
+        if lhs.can_resolve_unification(&rhs) {
             return;
         }
 
@@ -182,6 +187,11 @@ impl<'ast, T: TypeSystem> TypeInferenceCtx<'ast, T> {
         }
 
         false
+    }
+
+    /// Returns a symbol containing the given string.
+    pub fn symbol(&self, value: &str) -> Symbol<'ast> {
+        self.ast.symbol(value)
     }
 }
 

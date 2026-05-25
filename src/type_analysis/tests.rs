@@ -167,6 +167,11 @@ impl TypeProperties for MockType {
             _ => None,
         }
     }
+
+    fn can_resolve_unification(&self, other: &Self) -> bool {
+        // The mock type does not have coercible types so they resolve via equality.
+        self == other
+    }
 }
 
 impl ArrayTypeProperties for MockArrayType {

@@ -14,10 +14,11 @@ use melior::{
 };
 
 use crate::{
-    ast::{self, Spanned, Visitable},
+    ast::{self, AstContext, Spanned, Visitable},
     diagnostic::CompileError,
     ir::{
         Context, MlirTypeSystem,
+        llzk::LlzkInfo,
         verif::{
             helpers::accept_in_new_scope,
             scope::{CodegenScopeStack, ScopeData, ScopeTag},
@@ -47,12 +48,20 @@ type TypedExpression<'ast, 'ctx> = ast::Expression<'ast, Type<'ctx>>;
 type TypedIdentifier<'ast, 'ctx> = ast::Identifier<'ast, Type<'ctx>>;
 
 /// Generates IR for the given [`Document`] on a fresh module.
-pub fn emit_on_empty_module<'ctx>(
+pub fn emit_on_empty_module<'ctx, 'ast>(
     ctx: &'ctx Context,
+    ast: &'ast AstContext,
     filename: &str,
-    document: &ast::Document,
+    document: &ast::Document<'ast>,
+    circuit: &'ctx Module,
 ) -> Result<Module<'ctx>, CompileError> {
-    let typed_document = TypeChecker::check(MlirTypeSystem::new(ctx), filename, document)?;
+    let typed_document = TypeChecker::check(
+        MlirTypeSystem::new(ctx),
+        &LlzkInfo::new(circuit),
+        ast,
+        filename,
+        document,
+    )?;
     let module = ctx.fresh_module(filename, document.span());
     SpecCodegen::new(ctx, &module, filename.to_owned()).emit_ir(&typed_document)?;
     Ok(module)
