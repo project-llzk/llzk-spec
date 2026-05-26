@@ -3,10 +3,8 @@ use std::ops::{Deref, DerefMut};
 use crate::{
     ast::{Expression, QuantifierDomain, Visitable as _, Visitor},
     type_analysis::{
-        FnTypeProperties, TypeSystem, TypingResult,
-        base::BaseTypeChecker,
-        ctx::TypeInferenceCtx,
-        helpers::{Diagnostics, extract_result},
+        FnTypeProperties, TypeSystem, TypingResult, base::BaseTypeChecker, ctx::TypeInferenceCtx,
+        helpers::Diagnostics,
     },
 };
 
@@ -101,8 +99,8 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Expression<'ast>> for ExpressionTypeChec
                 span,
                 ..
             } => {
-                let left = extract_result(left.accept(self), &mut diags);
-                let right = extract_result(right.accept(self), &mut diags);
+                let left = diags.extract_result(left.accept(self));
+                let right = diags.extract_result(right.accept(self));
                 let expected = op.expected_type(self.ctx.ts());
                 self.constraint_to(left.as_ref(), expected.clone());
                 self.constraint_to(right.as_ref(), expected);
@@ -121,7 +119,7 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Expression<'ast>> for ExpressionTypeChec
             // -----------  -----------
             //  -e : Felt    !e : Bool
             Expression::Unary { op, expr, span, .. } => {
-                let expr = extract_result(expr.accept(self), &mut diags);
+                let expr = diags.extract_result(expr.accept(self));
                 let expected = op.expected_type(self.ctx.ts());
                 self.constraint_to(expr.as_ref(), expected);
                 self.unify(span, || format!("in unary op '{op}'"), &mut diags);

@@ -7,7 +7,7 @@ use crate::{
         base::BaseTypeChecker,
         ctx::TypeInferenceCtx,
         expression::{ExpressionTypeChecker, ExpressionTypeCheckerCfg},
-        helpers::{Diagnostics, check_many, extract_result},
+        helpers::{Diagnostics, check_many},
         invariant::InvariantTypeChecker,
         predicate::PredicateTypeChecker,
     },
@@ -102,7 +102,7 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Statement<'ast>> for BlockTypeChecker<'c
                     stmt_not_allowed!("require")
                 });
                 let mut expr_tc = ExpressionTypeChecker::new(self.source_name, self.ctx);
-                let expression = extract_result(expression.accept(&mut expr_tc), &mut diags);
+                let expression = diags.extract_result(expression.accept(&mut expr_tc));
                 self.constraint_to_bool(expression.as_ref());
                 self.unify(span, || "on require statement", &mut diags);
                 diags.finish(|| Statement::Require {
@@ -119,7 +119,7 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Statement<'ast>> for BlockTypeChecker<'c
                     stmt_not_allowed!("ensure")
                 });
                 let mut expr_tc = ExpressionTypeChecker::new(self.source_name, self.ctx);
-                let expression = extract_result(expression.accept(&mut expr_tc), &mut diags);
+                let expression = diags.extract_result(expression.accept(&mut expr_tc));
                 self.constraint_to_bool(expression.as_ref());
                 self.unify(span, || "on ensure statement", &mut diags);
                 diags.finish(|| Statement::Ensure {

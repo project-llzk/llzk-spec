@@ -79,19 +79,6 @@ impl UnaryOp {
     }
 }
 
-/// Extracts the typing result, accumulating the diagnostics if the result was a failure.
-///
-/// Return `Some` if the result was a `Ok` and return `None` otherwise.
-pub fn extract_result<T>(r: TypingResult<T>, diags: &mut Vec<Diagnostic>) -> Option<T> {
-    match r {
-        Ok(r) => Some(r),
-        Err(e) => {
-            diags.extend(e);
-            None
-        }
-    }
-}
-
 /// Type-checks a sequence of entities using the same visitor.
 ///
 /// The diagnostics emitted by the entities are grouped together. If any entity returns diagnostics
