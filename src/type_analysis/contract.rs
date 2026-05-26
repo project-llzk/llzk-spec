@@ -70,7 +70,7 @@ where
     ) {
         self.ctx.scope().push_local_limit(());
 
-        // Fill scope with template parameters (as normal locals?)
+        // Fill the scope with template parameters (as normal locals?)
         for info in info.template_params().filter(|info| info.r#type.is_some()) {
             let name = self.ident(info.name, decl);
             diags.extract_type_result(
@@ -82,20 +82,30 @@ where
             );
         }
 
-        // Fill scope with input arguments as parameters (with the param number)
+        // Fill the scope with input arguments as parameters (with the param number)
         for (n, t) in info.inputs().enumerate() {
             let name = self.ident(&format!("${n}"), decl);
             diags.extract_type_result(self.ctx.scope().top().bind_parameter(&name, t, n), || {
                 format!("while binding input #{n}")
             });
         }
-        // Fill scope with the struct members.
+        // Fill the scope with the struct members.
         for member in info.members() {
             let name = self.ident(member.name, decl);
             diags.extract_type_result(
                 self.ctx.scope().top().bind_local(&name, member.r#type),
                 || format!("while binding struct member '{}'", member.name),
             );
+        }
+        // Fill the scope with loop information.
+        for loop_info in info.loops(self.ctx.ts()) {
+            let name = Identifier::new(
+                loop_info.symbolize_label(self.ctx.ast()),
+                Default::default(),
+            );
+            diags.extract_type_result(self.ctx.scope().top().bind_loop(&name, loop_info), || {
+                format!("while binding loop '{}'", name.value())
+            });
         }
     }
 }
@@ -121,12 +131,9 @@ where
         self.ctx.scope().pop();
 
         diags.finish(|| {
-            // Bool type for now just to put something. The type of this identifier must be
-            // the type used for creating the corresponding MLIR op, if it's typed. Otherwise
-            // we should set it to an obvious placeholder like a void type.
-            let placeholder_type = self.ctx.ts().bool_type();
+            let t = self.ctx.ts().func_type(&[], &[]);
             ContractDecl::new(
-                decl.target().with_meta(placeholder_type),
+                decl.target().with_meta(t.into()),
                 body.unwrap(),
                 decl.span(),
             )

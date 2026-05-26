@@ -197,6 +197,10 @@ impl<'ast, T: TypeSystem> TypeInferenceCtx<'ast, T> {
     pub fn symbol(&self, value: &str) -> Symbol<'ast> {
         self.ast.symbol(value)
     }
+
+    pub(super) fn ast(&self) -> &'ast AstContext {
+        self.ast
+    }
 }
 
 /// A type constraint between two types.

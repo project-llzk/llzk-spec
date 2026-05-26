@@ -1,7 +1,7 @@
 use std::ops::{Deref, DerefMut};
 
 use crate::{
-    ast::{InvariantDecl, Spanned as _, Visitable as _, Visitor},
+    ast::{Identifier, InvariantDecl, Spanned as _, Visitable as _, Visitor},
     type_analysis::{
         TypeSystem, TypingResult,
         base::BaseTypeChecker,
@@ -34,6 +34,46 @@ impl<'ctx, 'ast, T: TypeSystem> InvariantTypeChecker<'ctx, 'ast, T> {
             allows_invariant_stmts: true,
         }
     }
+
+    fn push_and_bind(
+        &mut self,
+        decl: &InvariantDecl<'ast>,
+        diags: &mut Diagnostics,
+    ) -> TypingResult<Vec<Identifier<'ast, T::Type>>> {
+        let info = diags.to_typing_result(self.ctx.scope().find_loop(decl.loop_name()), || {
+            format!(
+                "on invariant declaration of loop '{}'",
+                decl.loop_name().value()
+            )
+        })?;
+
+        diags.add_unless(decl.bindings().len() == info.bindings().len(), || {
+            format!(
+                "invariant declaration was expecting {} parameters but the loop has {}",
+                decl.bindings().len(),
+                info.bindings().len()
+            )
+        });
+
+        let bindings = info
+            .bindings()
+            .iter()
+            .map(|b| b.r#type().clone())
+            .collect::<Vec<_>>();
+
+        self.ctx.scope().push(());
+
+        Ok(std::iter::zip(decl.bindings(), bindings)
+            .map(|(name, binding)| {
+                diags.extract_type_result(
+                    self.ctx.scope().top().bind_local(name, binding.clone()),
+                    || format!("while binding invariant identifier '{}", name.value()),
+                );
+
+                name.with_meta(binding)
+            })
+            .collect())
+    }
 }
 
 impl<'ast, 'ctx, T: TypeSystem> Visitor<InvariantDecl<'ast>>
@@ -42,34 +82,21 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<InvariantDecl<'ast>>
     type Output = TypingResult<InvariantDecl<'ast, T::Type>>;
 
     fn visit(&mut self, decl: &InvariantDecl<'ast>) -> Self::Output {
-        // Basic invariant type-checking without checking if the loop exists.
-        // That part can be added with the info traits used in other parts of the type-checker.
-        // Or by another bindings table in the scope just for loops.
-
-        let felt_type = self.ctx.ts().felt_type();
         let mut diags = Diagnostics::new(self.source_name, decl);
 
-        self.ctx.scope().push(());
-
-        for name in decl.bindings() {
-            diags.extract_type_result(
-                self.ctx.scope().top().bind_local(name, felt_type.clone()),
-                || "while binding invariant identifier",
-            );
-        }
-
+        let bindings = self.push_and_bind(decl, &mut diags)?;
         let mut block_tc = BlockTypeChecker::new(self.source_name, self.ctx, Self::block_cfg());
         let body = diags.extract_result(decl.body().accept(&mut block_tc));
         self.ctx.scope().pop();
-
         diags.finish(|| {
-            let placeholder_type = self.ctx.ts().bool_type();
+            let bindings_types = bindings
+                .iter()
+                .map(|i| i.meta().clone())
+                .collect::<Vec<_>>();
+            let t = self.ctx.ts().func_type(&bindings_types, &[]);
             InvariantDecl::new(
-                decl.loop_name().with_meta(placeholder_type),
-                // All bindings are assumed to be Felts.
-                decl.bindings()
-                    .iter()
-                    .map(|i| i.with_meta(felt_type.clone())),
+                decl.loop_name().with_meta(t.into()),
+                bindings,
                 body.unwrap(),
                 decl.span(),
             )

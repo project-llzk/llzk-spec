@@ -6,6 +6,7 @@ use crate::{
     ast::{Identifier, Symbol},
     type_analysis::{
         FnTypeProperties, TypeProperties, TypeSystem, ctx::Subst, error::TypeAnalysisError,
+        loops::LoopInfo,
     },
 };
 
@@ -174,6 +175,14 @@ impl<'ast, L, F> ScopeStack<'ast, L, F, ()> {
             Some(())
         }
     }
+
+    /// Looks for a loop binding with the given identifier.
+    pub fn find_loop(&self, name: &Identifier<'ast>) -> Result<&LoopInfo<L>, TypeAnalysisError> {
+        self.ordered_local_scopes()
+            // Fetch the closest binding
+            .find_map(|scope| scope.loops.get(&name.symbol()))
+            .ok_or_else(|| TypeAnalysisError::UnknownLoop(name.value().to_owned()))
+    }
 }
 
 impl<L, F, P> std::fmt::Debug for ScopeStack<'_, L, F, P>
@@ -199,6 +208,10 @@ pub struct Scope<'ast, L, F, P> {
     locals: HashMap<Symbol<'ast>, L>,
     /// Maps argument numbers to local symbols at this scope level.
     params: HashMap<usize, Symbol<'ast>>,
+    /// Maps names to loops defined on the circuit.
+    ///
+    /// Accessors for this bindings table are only available if `P == ()`.
+    loops: HashMap<Symbol<'ast>, LoopInfo<L>>,
     /// Indicates wether this scope entry limits the access to the locals defined in outer scopes.
     local_limit: bool,
     /// Additional payload used by the scope.
@@ -212,6 +225,7 @@ impl<'ast, L, F, P> Scope<'ast, L, F, P> {
             predicates: Default::default(),
             locals: Default::default(),
             params: Default::default(),
+            loops: Default::default(),
             local_limit,
             payload,
         }
@@ -277,20 +291,47 @@ impl<'ast, L, F, P> Scope<'ast, L, F, P> {
     }
 }
 
+impl<'ast, L, F> Scope<'ast, L, F, ()> {
+    /// Binds the given loop information to a loop name.
+    pub fn bind_loop(
+        &mut self,
+        name: &Identifier<'ast>,
+        info: LoopInfo<L>,
+    ) -> Result<(), TypeAnalysisError> {
+        if self.loops.contains_key(&name.symbol()) {
+            return Err(TypeAnalysisError::DuplicateLoop(name.value().to_owned()));
+        }
+        self.loops.insert(name.symbol(), info);
+        Ok(())
+    }
+}
+
 impl<L, F, P> std::fmt::Debug for Scope<'_, L, F, P>
 where
     L: std::fmt::Display,
     F: std::fmt::Display,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "  Predicates:")?;
-        self.predicates
-            .iter()
-            .try_for_each(|(symbol, binding)| writeln!(f, "    {}: {binding}", symbol.value()))?;
-        writeln!(f, "  Locals:")?;
-        self.locals
-            .iter()
-            .try_for_each(|(symbol, binding)| writeln!(f, "    {}: {binding}", symbol.value()))
+        if !self.predicates.is_empty() {
+            writeln!(f, "  Predicates:")?;
+            self.predicates.iter().try_for_each(|(symbol, binding)| {
+                writeln!(f, "    {}: {binding}", symbol.value())
+            })?;
+        }
+        if !self.locals.is_empty() {
+            writeln!(f, "  Locals:")?;
+            self.locals.iter().try_for_each(|(symbol, binding)| {
+                writeln!(f, "    {}: {binding}", symbol.value())
+            })?;
+        }
+        if !self.loops.is_empty() {
+            writeln!(f, "  Loops:")?;
+            self.locals.iter().try_for_each(|(symbol, binding)| {
+                writeln!(f, "    {}: {binding}", symbol.value())
+            })?;
+        }
+
+        Ok(())
     }
 }
 

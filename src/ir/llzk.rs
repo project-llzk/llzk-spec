@@ -7,6 +7,7 @@
 use crate::ast::Identifier;
 use crate::diagnostic::CompileError;
 use crate::ir::MlirTypeSystem;
+use crate::type_analysis::loops::{LoopInfo, LoopLabel};
 use crate::type_analysis::{CircuitInfo, MemberInfo, ParamInfo, StructInfo};
 use llzk::dialect::{
     array::ArrayType,
@@ -145,6 +146,50 @@ impl<'ctx> StructInfo<'ctx> for LlzkStructInfo<'ctx, '_> {
                 op.type_opt().map(|t| unsafe { Type::from_raw(t.to_raw()) }),
             )
         })
+    }
+
+    fn loops(&self, ts: &mut Self::TypeSystem) -> Vec<LoopInfo<Type<'ctx>>> {
+        fn create_label<'c: 'a, 'a>(operation: OperationRef<'c, 'a>, next_id: usize) -> LoopLabel {
+            operation
+                .attribute("loop_label")
+                .ok()
+                .and_then(|attribute| StringAttribute::try_from(attribute).ok())
+                .map(|attribute| attribute.value())
+                .map(LoopLabel::named)
+                .unwrap_or(LoopLabel::implicit(next_id))
+        }
+
+        let mut info = vec![];
+        let op_ref: OperationRef = match *self {
+            LlzkStructInfo::Struct(op_ref) => op_ref.into(),
+            LlzkStructInfo::Function(op_ref) => op_ref.into(),
+        };
+        op_ref.walk(WalkOrder::PreOrder, |op| {
+            let i = op.name();
+            let label = create_label(op, info.len());
+            match i.as_string_ref().as_str().ok().unwrap() {
+                "scf.for" => {
+                    info.push(LoopInfo::new_for_loop(
+                        label,
+                        ts,
+                        // For loops have 3 base operands (lb, up, stride) and then it's extra arguments.
+                        op.operands()
+                            .skip(3)
+                            .map(|v| unsafe { Type::from_raw(v.r#type().to_raw()) }),
+                    ));
+                }
+                "scf.while" => {
+                    info.push(LoopInfo::new_while_loop(
+                        label,
+                        op.operands()
+                            .map(|v| unsafe { Type::from_raw(v.r#type().to_raw()) }),
+                    ));
+                }
+                _ => {}
+            };
+            WalkResult::Advance
+        });
+        info
     }
 }
 

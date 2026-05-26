@@ -6,7 +6,7 @@ use crate::{
     ast::{AstContext, Document, Identifier, Item, Spanned as _, Visitable, Visitor},
     diagnostic::{CompileError, Diagnostic},
     type_analysis::{
-        contract::ContractTypeChecker, ctx::TypeInferenceCtx, helpers::check_many,
+        contract::ContractTypeChecker, ctx::TypeInferenceCtx, helpers::check_many, loops::LoopInfo,
         predicate::PredicateTypeChecker,
     },
 };
@@ -19,6 +19,7 @@ mod error;
 mod expression;
 mod helpers;
 mod invariant;
+pub mod loops;
 mod predicate;
 pub mod scope;
 
@@ -256,6 +257,12 @@ pub trait StructInfo<'info> {
     fn template_params(
         &self,
     ) -> impl Iterator<Item = ParamInfo<'info, <Self::TypeSystem as TypeSystem>::Type>>;
+
+    /// Returns the list of loops defined inside the struct.
+    fn loops(
+        &self,
+        ts: &mut Self::TypeSystem,
+    ) -> Vec<LoopInfo<<Self::TypeSystem as TypeSystem>::Type>>;
 }
 
 /// Information about a struct's member.

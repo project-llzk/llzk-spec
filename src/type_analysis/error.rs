@@ -11,10 +11,14 @@ pub enum TypeAnalysisError {
     DuplicatePredicate(String),
     #[error("duplicate local '{0}'")]
     DuplicateLocal(String),
+    #[error("duplicate loop '{0}'")]
+    DuplicateLoop(String),
     #[error("unknown predicate '{0}'")]
     UnknownPredicate(String),
     #[error("unknown local '{0}'")]
     UnknownLocal(String),
+    #[error("unknown loop '{0}'")]
+    UnknownLoop(String),
     #[error("expected type '{0}' but got '{1}'")]
     UnexpectedTypes(String, String),
     #[error("type '{0}' is infinite")]
