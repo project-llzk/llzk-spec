@@ -1,12 +1,15 @@
-use std::marker::PhantomData;
+use std::{
+    marker::PhantomData,
+    ops::{Deref, DerefMut},
+};
 
 use crate::{
     ast::{ContractDecl, Identifier, Spanned, Visitable, Visitor},
-    diagnostic::Diagnostic,
     type_analysis::{
         CircuitInfo, StructInfo, TypeInferenceCtx, TypeSystem, TypingResult,
+        base::BaseTypeChecker,
         block::{BlockTypeChecker, BlockTypeCheckerCfg},
-        helpers::extract_result,
+        helpers::Diagnostics,
     },
 };
 
@@ -16,8 +19,7 @@ where
     T: TypeSystem,
     C: CircuitInfo<'c, TypeSystem = T>,
 {
-    source_name: &'ast str,
-    ctx: &'ctx mut TypeInferenceCtx<'ast, T>,
+    base: BaseTypeChecker<'ctx, 'ast, T>,
     info: &'info C,
     _marker: PhantomData<&'c ()>,
 }
@@ -34,10 +36,66 @@ where
         source_name: &'ast str,
     ) -> Self {
         Self {
-            ctx,
-            source_name,
+            base: BaseTypeChecker::new(ctx, source_name),
             info,
             _marker: PhantomData,
+        }
+    }
+
+    /// Configuration for type-checking inside a contract block.
+    fn block_cfg() -> BlockTypeCheckerCfg {
+        BlockTypeCheckerCfg {
+            allows_invariants: true,
+            allows_scoped: true,
+            allows_ensure_and_require: true,
+            allows_return: false,
+            allows_invariant_stmts: false,
+        }
+    }
+
+    /// Create an identifier located on the contract's span.
+    ///
+    /// Use it for implicit bindings like struct members.
+    fn ident(&self, name: &str, decl: &ContractDecl<'ast>) -> Identifier<'ast> {
+        Identifier::new(self.ctx.symbol(name), decl.span())
+    }
+
+    /// Pushes a new scope and binds the implicit environment derived from the object associated to
+    /// the contract.
+    fn push_and_bind(
+        &mut self,
+        decl: &ContractDecl<'ast>,
+        info: impl StructInfo<'c, TypeSystem = T>,
+        diags: &mut Diagnostics,
+    ) {
+        self.ctx.scope().push_local_limit(());
+
+        // Fill scope with template parameters (as normal locals?)
+        for info in info.template_params().filter(|info| info.r#type.is_some()) {
+            let name = self.ident(info.name, decl);
+            diags.extract_type_result(
+                self.ctx
+                    .scope()
+                    .top()
+                    .bind_local(&name, info.r#type.unwrap()),
+                || format!("while binding template parameter '{}'", info.name),
+            );
+        }
+
+        // Fill scope with input arguments as parameters (with the param number)
+        for (n, t) in info.inputs().enumerate() {
+            let name = self.ident(&format!("${n}"), decl);
+            diags.extract_type_result(self.ctx.scope().top().bind_parameter(&name, t, n), || {
+                format!("while binding input #{n}")
+            });
+        }
+        // Fill scope with the struct members.
+        for member in info.members() {
+            let name = self.ident(member.name, decl);
+            diags.extract_type_result(
+                self.ctx.scope().top().bind_local(&name, member.r#type),
+                || format!("while binding struct member '{}'", member.name),
+            );
         }
     }
 }
@@ -51,97 +109,49 @@ where
     type Output = TypingResult<ContractDecl<'ast, T::Type>>;
 
     fn visit(&mut self, decl: &ContractDecl<'ast>) -> Self::Output {
-        let mut diags = vec![];
+        let mut diags = Diagnostics::new(self.source_name, decl);
 
-        let struct_info = self.info.find_struct(decl.target()).map_err(|err| {
-            vec![Diagnostic::new(
-                self.source_name,
-                format!("in contract declaration: {err}"),
-                Some(decl.span()),
-            )]
+        let struct_info = diags.from_other_result(self.info.find_struct(decl.target()), |err| {
+            format!("in contract declaration: {err}")
         })?;
 
-        // 1. Push a new scope with a local limit
-        self.ctx.scope().push_local_limit(());
-        // 2. Fill scope with template parameters (as normal locals?)
-        for info in struct_info.template_params() {
-            let Some(t) = info.r#type else {
-                continue;
-            };
-            let name = Identifier::new(self.ctx.symbol(info.name), decl.span());
-            extract_result(
-                self.ctx.scope().top().bind_local(&name, t).map_err(|err| {
-                    err.into_diags(
-                        self.source_name,
-                        Some(decl.span()),
-                        format!("while binding template parameter '{}'", info.name),
-                    )
-                }),
-                &mut diags,
-            );
-        }
-        // 3. Fill scope with input arguments as parameters (with the param number)
-        for (n, t) in struct_info.inputs().enumerate() {
-            let name = Identifier::new(self.ctx.symbol(&format!("${n}")), decl.span());
-            extract_result(
-                self.ctx
-                    .scope()
-                    .top()
-                    .bind_parameter(&name, t, n)
-                    .map_err(|err| {
-                        err.into_diags(
-                            self.source_name,
-                            Some(decl.span()),
-                            format!("while binding input #{n}"),
-                        )
-                    }),
-                &mut diags,
-            );
-        }
-        // 4. Fill scope with the struct members.
-        for member in struct_info.members() {
-            let name = Identifier::new(self.ctx.symbol(member.name), decl.span());
-            extract_result(
-                self.ctx
-                    .scope()
-                    .top()
-                    .bind_local(&name, member.r#type)
-                    .map_err(|err| {
-                        err.into_diags(
-                            self.source_name,
-                            Some(decl.span()),
-                            format!("while binding struct member '{}'", member.name),
-                        )
-                    }),
-                &mut diags,
-            );
-        }
-        // 5. Type-check the body.
-        let mut block_tc = BlockTypeChecker::new(
-            self.source_name,
-            self.ctx,
-            BlockTypeCheckerCfg {
-                allows_invariants: true,
-                allows_scoped: true,
-                allows_ensure_and_require: true,
-                allows_return: false,
-                allows_invariant_stmts: false,
-            },
-        );
-        let body = extract_result(decl.body().accept(&mut block_tc), &mut diags);
-        // 6. Pop the scope.
+        self.push_and_bind(decl, struct_info, &mut diags);
+        let mut block_tc = BlockTypeChecker::new(self.source_name, self.ctx, Self::block_cfg());
+        let body = diags.extract_result(decl.body().accept(&mut block_tc));
         self.ctx.scope().pop();
 
-        if !diags.is_empty() {
-            return Err(diags);
-        }
-        Ok(ContractDecl::new(
+        diags.finish(|| {
             // Bool type for now just to put something. The type of this identifier must be
             // the type used for creating the corresponding MLIR op, if it's typed. Otherwise
             // we should set it to an obvious placeholder like a void type.
-            decl.target().with_meta(self.ctx.ts().bool_type()),
-            body.unwrap(),
-            decl.span(),
-        ))
+            let placeholder_type = self.ctx.ts().bool_type();
+            ContractDecl::new(
+                decl.target().with_meta(placeholder_type),
+                body.unwrap(),
+                decl.span(),
+            )
+        })
+    }
+}
+
+impl<'ctx, 'ast, 'info, T, C> DerefMut for ContractTypeChecker<'ctx, 'ast, '_, 'info, T, C>
+where
+    T: TypeSystem,
+    C: CircuitInfo<'info, TypeSystem = T>,
+{
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.base
+    }
+}
+
+impl<'ctx, 'ast, 'info, T, C> Deref for ContractTypeChecker<'ctx, 'ast, '_, 'info, T, C>
+where
+    T: TypeSystem,
+    C: CircuitInfo<'info, TypeSystem = T>,
+{
+    type Target = BaseTypeChecker<'ctx, 'ast, T>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.base
     }
 }

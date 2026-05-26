@@ -153,20 +153,21 @@ impl<'ast, T: TypeSystem> TypeInferenceCtx<'ast, T> {
 
         if t.is_func_type() {
             let t = t.to_func_type().unwrap();
-            let ins = t
-                .inputs()
-                .iter()
-                .map(|t| Self::apply(t, subst, ts))
-                .collect::<Vec<_>>();
-            let outs = t
-                .outputs()
-                .iter()
-                .map(|t| Self::apply(t, subst, ts))
-                .collect::<Vec<_>>();
+            let ins = Self::apply_many(t.inputs(), subst, ts);
+            let outs = Self::apply_many(t.outputs(), subst, ts);
             return ts.func_type(&ins, &outs).into();
         }
 
         t.clone()
+    }
+
+    /// Applies substitutions to a sequence of types until the most concrete type available is found for each.
+    fn apply_many(
+        t: impl IntoIterator<Item = T::Type>,
+        subst: &Subst<T>,
+        ts: &mut T,
+    ) -> Vec<T::Type> {
+        t.into_iter().map(|t| Self::apply(&t, subst, ts)).collect()
     }
 
     /// Returns true if the type variable is self recursive.
@@ -182,8 +183,11 @@ impl<'ast, T: TypeSystem> TypeInferenceCtx<'ast, T> {
         }
 
         if let Some(t) = t.to_func_type() {
-            return t.inputs().iter().any(|i| Self::occurs(id, i, subst, ts))
-                || t.outputs().iter().any(|o| Self::occurs(id, o, subst, ts));
+            return t
+                .inputs()
+                .iter()
+                .chain(t.outputs().iter())
+                .any(|i| Self::occurs(id, i, subst, ts));
         }
 
         false

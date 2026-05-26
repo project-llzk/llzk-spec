@@ -11,6 +11,7 @@ use crate::{
     },
 };
 
+mod base;
 mod block;
 mod contract;
 mod ctx;
@@ -96,8 +97,8 @@ where
                 .map(Into::into),
             Item::Predicate(decl) => decl
                 .accept(&mut PredicateTypeChecker::new(
-                    &mut self.ctx,
                     self.source_name,
+                    &mut self.ctx,
                 ))
                 .map(Into::into),
         }

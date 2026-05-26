@@ -1,12 +1,12 @@
+use std::ops::{Deref, DerefMut};
+
 use crate::{
-    ast::{
-        BinaryOp, Expression, QuantifierDomain,
-        QuantifierKind::{Exists, Forall},
-        Span, Spanned as _, UnaryOp, Visitable as _, Visitor,
-    },
-    diagnostic::Diagnostic,
+    ast::{Expression, QuantifierDomain, Visitable as _, Visitor},
     type_analysis::{
-        FnTypeProperties, TypeSystem, TypingResult, ctx::TypeInferenceCtx, helpers::extract_result,
+        FnTypeProperties, TypeSystem, TypingResult,
+        base::BaseTypeChecker,
+        ctx::TypeInferenceCtx,
+        helpers::{Diagnostics, extract_result},
     },
 };
 
@@ -23,8 +23,7 @@ impl Default for ExpressionTypeCheckerCfg {
 
 /// Configurable type checker of expressions.
 pub(super) struct ExpressionTypeChecker<'ctx, 'ast, T: TypeSystem> {
-    source_name: &'ast str,
-    ctx: &'ctx mut TypeInferenceCtx<'ast, T>,
+    base: BaseTypeChecker<'ctx, 'ast, T>,
     cfg: ExpressionTypeCheckerCfg,
 }
 
@@ -41,61 +40,9 @@ impl<'ctx, 'ast, T: TypeSystem> ExpressionTypeChecker<'ctx, 'ast, T> {
         cfg: ExpressionTypeCheckerCfg,
     ) -> Self {
         Self {
-            source_name,
-            ctx,
+            base: BaseTypeChecker::new(ctx, source_name),
             cfg,
         }
-    }
-
-    /// Type-checks a binary expression.
-    fn check_binary_op_types(
-        &mut self,
-        op: BinaryOp,
-        left: Option<&Expression<'_, T::Type>>,
-        right: Option<&Expression<'_, T::Type>>,
-        diags: &mut Vec<Diagnostic>,
-        span: Span,
-    ) {
-        let expected = op.expected_type(self.ctx.ts());
-
-        for expr in [left, right].into_iter().flatten() {
-            self.ctx.add_constraint(expected.clone(), expr.r#type());
-        }
-
-        extract_result(
-            self.ctx.unify().map_err(|errs| {
-                errs.into_iter()
-                    .flat_map(|err| {
-                        err.into_diags(self.source_name, Some(span), format!("in binary op '{op}'"))
-                    })
-                    .collect()
-            }),
-            diags,
-        );
-    }
-
-    /// Type-checks an unary expression.
-    fn check_unary_op_types(
-        &mut self,
-        op: UnaryOp,
-        expr: Option<&Expression<'_, T::Type>>,
-        diags: &mut Vec<Diagnostic>,
-        span: Span,
-    ) {
-        if let Some(expr) = expr {
-            let expected = op.expected_type(self.ctx.ts());
-            self.ctx.add_constraint(expected, expr.r#type());
-        }
-        extract_result(
-            self.ctx.unify().map_err(|errs| {
-                errs.into_iter()
-                    .flat_map(|err| {
-                        err.into_diags(self.source_name, Some(span), format!("in unary op '{op}'"))
-                    })
-                    .collect()
-            }),
-            diags,
-        );
     }
 }
 
@@ -103,6 +50,7 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Expression<'ast>> for ExpressionTypeChec
     type Output = TypingResult<Expression<'ast, T::Type>>;
 
     fn visit(&mut self, expr: &Expression<'ast>) -> Self::Output {
+        let mut diags = Diagnostics::new(self.source_name, expr);
         match expr {
             //  c : Bool, e_0 : t, e_1 : t
             // ----------------------------
@@ -114,51 +62,24 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Expression<'ast>> for ExpressionTypeChec
                 span,
                 ..
             } => {
-                let mut diags = vec![];
-                let condition = extract_result(condition.accept(self), &mut diags);
-                let then_branch = extract_result(then_branch.accept(self), &mut diags);
-                let else_branch = extract_result(else_branch.accept(self), &mut diags);
+                let condition = diags.extract_result(condition.accept(self));
+                let then_branch = diags.extract_result(then_branch.accept(self));
+                let else_branch = diags.extract_result(else_branch.accept(self));
 
-                let bool_type = self.ctx.ts().bool_type();
-                if let Some(condition) = &condition {
-                    self.ctx.add_constraint(bool_type, condition.r#type());
-                }
+                self.constraint_to_bool(condition.as_ref());
+                self.constraint_equal(then_branch.as_ref(), else_branch.as_ref());
+                self.unify(span, || "on conditional expression", &mut diags);
 
-                if let Some((then_branch, else_branch)) =
-                    then_branch.as_ref().zip(else_branch.as_ref())
-                {
-                    self.ctx
-                        .add_constraint(then_branch.r#type(), else_branch.r#type());
-                }
-
-                extract_result(
-                    self.ctx.unify().map_err(|err| {
-                        err.into_iter()
-                            .flat_map(|err| {
-                                err.into_diags(
-                                    self.source_name,
-                                    Some(*span),
-                                    "on conditional expression",
-                                )
-                            })
-                            .collect()
-                    }),
-                    &mut diags,
-                );
-
-                if !diags.is_empty() {
-                    return Err(diags);
-                }
-
-                let then_branch = then_branch.unwrap();
-                let return_type = self.ctx.resolve(then_branch.r#type());
-
-                Ok(Expression::Conditional {
-                    condition: Box::new(condition.unwrap()),
-                    then_branch: Box::new(then_branch),
-                    else_branch: Box::new(else_branch.unwrap()),
-                    span: *span,
-                    meta: return_type,
+                diags.finish(|| {
+                    let then_branch = then_branch.unwrap();
+                    let return_type = self.ctx.resolve(then_branch.r#type());
+                    Expression::Conditional {
+                        condition: Box::new(condition.unwrap()),
+                        then_branch: Box::new(then_branch),
+                        else_branch: Box::new(else_branch.unwrap()),
+                        span: *span,
+                        meta: return_type,
+                    }
                 })
             }
 
@@ -180,15 +101,14 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Expression<'ast>> for ExpressionTypeChec
                 span,
                 ..
             } => {
-                let mut diags = vec![];
                 let left = extract_result(left.accept(self), &mut diags);
                 let right = extract_result(right.accept(self), &mut diags);
-                self.check_binary_op_types(*op, left.as_ref(), right.as_ref(), &mut diags, *span);
-                if !diags.is_empty() {
-                    return Err(diags);
-                }
+                let expected = op.expected_type(self.ctx.ts());
+                self.constraint_to(left.as_ref(), expected.clone());
+                self.constraint_to(right.as_ref(), expected);
+                self.unify(span, || format!("in binary op '{op}'"), &mut diags);
 
-                Ok(Expression::Binary {
+                diags.finish(|| Expression::Binary {
                     op: *op,
                     left: Box::new(left.unwrap()),
                     right: Box::new(right.unwrap()),
@@ -201,22 +121,70 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Expression<'ast>> for ExpressionTypeChec
             // -----------  -----------
             //  -e : Felt    !e : Bool
             Expression::Unary { op, expr, span, .. } => {
-                let mut diags = vec![];
                 let expr = extract_result(expr.accept(self), &mut diags);
-                self.check_unary_op_types(*op, expr.as_ref(), &mut diags, *span);
-                if !diags.is_empty() {
-                    return Err(diags);
-                }
+                let expected = op.expected_type(self.ctx.ts());
+                self.constraint_to(expr.as_ref(), expected);
+                self.unify(span, || format!("in unary op '{op}'"), &mut diags);
 
-                Ok(Expression::Unary {
+                diags.finish(|| Expression::Unary {
                     op: *op,
                     expr: Box::new(expr.unwrap()),
                     span: *span,
                     meta: op.return_type(self.ctx.ts()),
                 })
             }
-            Expression::Index { .. } => todo!(),
-            Expression::Member { .. } => todo!(),
+
+            //  e_0 : Array of t, e_1 : Felt
+            // ------------------------------
+            //          e_0[e_1] : t
+            Expression::Index {
+                target,
+                index,
+                span,
+                ..
+            } => {
+                let target = diags.extract_result(target.accept(self));
+                let index = diags.extract_result(index.accept(self));
+
+                self.constraint_to_felt(index.as_ref());
+                let result_type = self.ctx.ts().fresh_var();
+                // TODO: Constraint 'target' to be an Array of 'result_type'
+
+                self.unify(span, || "on index expression", &mut diags);
+                diags.finish(|| Expression::Index {
+                    target: Box::new(target.unwrap()),
+                    index: Box::new(index.unwrap()),
+                    span: *span,
+                    meta: result_type,
+                })
+            }
+
+            //  e : t_0 <: { m : t_1 }
+            // ------------------------
+            //        e.m : t_1
+            //
+            // 't_0' is a sub-type of an anonymous struct-like type that has a member 'm' of type
+            // 't_1'. In plain English, 't_0' has a member 'm' whose type we constraint to be
+            // 't_1'.
+            //
+            // TODO: Currently, that rule above is not checked.
+            Expression::Member {
+                target,
+                member,
+                span,
+                ..
+            } => {
+                let target = diags.extract_result(target.accept(self));
+                let result_type = self.ctx.ts().fresh_var();
+
+                self.unify(span, || "on member access expression", &mut diags);
+                diags.finish(|| Expression::Member {
+                    target: Box::new(target.unwrap()),
+                    member: member.with_meta(result_type.clone()),
+                    span: *span,
+                    meta: result_type,
+                })
+            }
 
             //  env.predicates(f) : t_0 * ... * t_k -> t_r, e_0 : t_0, ..., e_k : t_k
             // -----------------------------------------------------------------------
@@ -227,70 +195,43 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Expression<'ast>> for ExpressionTypeChec
                 callee, args, span, ..
             } => {
                 let bool_type = self.ctx.ts().bool_type();
-                let mut diags = vec![];
                 // Process arguments.
-                let mut new_args = Vec::with_capacity(args.len());
-                for arg in args {
-                    let arg = extract_result(arg.accept(self), &mut diags);
-                    new_args.push(arg);
-                }
+                let new_args = diags.extract_many_results(args.iter().map(|arg| arg.accept(self)));
 
                 // Locate callee.
-                let callee_type = self
-                    .ctx
-                    .scope()
-                    .find_predicate(callee)
-                    .map_err(|err| {
-                        err.into_diags(self.source_name, Some(*span), "on call expression")
-                    })?
-                    .clone();
+                let callee_type = diags.to_typing_result(
+                    self.ctx.scope().find_predicate(callee).cloned(),
+                    || "on call expression",
+                )?;
                 // Add constraints between the types of the expressions and the declared type of
                 // the function type.
                 let callee_inputs = callee_type.inputs();
-                if callee_inputs.len() != new_args.len() {
-                    diags.push(Diagnostic::new(
-                        self.source_name,
-                        format!(
-                            "predicate '{}' expects {} arguments but for {}",
-                            callee.value(),
-                            callee_type.inputs().len(),
-                            new_args.len()
-                        ),
-                        Some(*span),
-                    ));
-                }
-                for (formal, arg) in std::iter::zip(callee_inputs, &new_args) {
-                    let Some(arg) = arg else {
-                        continue;
-                    };
-                    self.ctx.add_constraint(formal.clone(), arg.r#type());
-                }
-                if callee_type.outputs().len() != 1 {
-                    diags.push(Diagnostic::new(self.source_name, format!("expected predicate '{}' to return a single boolean expression but return {} expressions", callee.value(), callee_type.outputs().len()), Some(*span)));
-                }
-                self.ctx
-                    .add_constraint(bool_type.clone(), callee_type.outputs()[0].clone());
+                diags.add_unless(callee_inputs.len() == new_args.len(), || {
+                    format!(
+                        "predicate '{}' expects {} arguments but got {}",
+                        callee.value(),
+                        callee_type.inputs().len(),
+                        new_args.len()
+                    )
+                });
 
-                extract_result(
-                    self.ctx.unify().map_err(|err| {
-                        err.into_iter()
-                            .flat_map(|err| {
-                                err.into_diags(
-                                    self.source_name,
-                                    Some(*span),
-                                    format!("on callsite to '{}'", callee.value()),
-                                )
-                            })
-                            .collect()
-                    }),
+                std::iter::zip(callee_inputs, &new_args).for_each(|(formal, arg)| {
+                    self.constraint_to(arg.as_ref(), formal);
+                });
+                let callee_outputs = callee_type.outputs();
+                diags.add_unless(callee_outputs.len() == 1, || format!("expected predicate '{}' to return a single boolean expression but returns {} expressions", callee.value(), callee_outputs.len()));
+                self.ctx.add_constraint(
+                    bool_type.clone(),
+                    callee_outputs.into_iter().next().unwrap(),
+                );
+
+                self.unify(
+                    span,
+                    || format!("on callsite to '{}'", callee.value()),
                     &mut diags,
                 );
 
-                if !diags.is_empty() {
-                    return Err(diags);
-                }
-
-                Ok(Expression::Call {
+                diags.finish(|| Expression::Call {
                     callee: callee.with_meta(callee_type.into()),
                     // If diags is empty then these should be Some.
                     args: new_args.into_iter().map(Option::unwrap).collect(),
@@ -302,87 +243,141 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Expression<'ast>> for ExpressionTypeChec
             //       s: Felt, e: Bool
             // -------------------------------
             //   forall s in N..M, e  : Bool
-            Expression::Quantifier {
-                quantifier_kind: Forall,
-                domain: QuantifierDomain::Range { .. },
-                ..
-            } => todo!(),
-            //  e_0 : Array of t, s : t, e_1: Bool
-            // ------------------------------------
-            //     forall s in e_0, e_1  : Bool
-            Expression::Quantifier {
-                quantifier_kind: Forall,
-                domain: QuantifierDomain::Expr(_),
-                ..
-            } => todo!(),
+            //
             //       s: Felt, e: Bool
             // -------------------------------
             //   exists s in N..M, e  : Bool
-            Expression::Quantifier {
-                quantifier_kind: Exists,
-                domain: QuantifierDomain::Range { .. },
-                ..
-            } => todo!(),
+            //
+            //  e_0 : Array of t, s : t, e_1: Bool
+            // ------------------------------------
+            //     forall s in e_0, e_1  : Bool
+            //
             //  e_0 : Array of t, s : t, e_1: Bool
             // ------------------------------------
             //     exists s in e_0, e_1  : Bool
             Expression::Quantifier {
-                quantifier_kind: Exists,
-                domain: QuantifierDomain::Expr(_),
+                quantifier_kind,
+                domain,
+                binding,
+                body,
+                span,
                 ..
-            } => todo!(),
+            } => {
+                let (binding_type, domain) = match domain {
+                    QuantifierDomain::Range {
+                        start,
+                        end,
+                        span: range_span,
+                    } => {
+                        // Constraint N and M to be felts.
+                        let domain_start = diags.extract_result(start.accept(self));
+                        let domain_end = diags.extract_result(end.accept(self));
+                        self.constraint_to_felt(domain_start.as_ref());
+                        self.constraint_to_felt(domain_end.as_ref());
+                        (
+                            // The type of the binding is always Felt in this case.
+                            self.ctx.ts().felt_type(),
+                            domain_start.zip(domain_end).map(|(start, end)| {
+                                QuantifierDomain::Range {
+                                    start: Box::new(start),
+                                    end: Box::new(end),
+                                    span: *range_span,
+                                }
+                            }),
+                        )
+                    }
+                    QuantifierDomain::Expr(expression) => {
+                        // Bind the quantifier's local to a fresh variable.
+                        let binding_type = self.ctx.ts().fresh_var();
+                        // The expression must be of type Array of the fresh variable.
+                        // But actually checking that is a TODO because Array types are not super
+                        // stable right now.
+                        let expr = diags.extract_result(expression.accept(self));
+                        (
+                            binding_type,
+                            expr.map(|expr| QuantifierDomain::Expr(Box::new(expr))),
+                        )
+                    }
+                };
+                self.ctx.scope().push(());
+                diags.extract_type_result(
+                    self.ctx
+                        .scope()
+                        .top()
+                        .bind_local(binding, binding_type.clone()),
+                    || "on quantifier expression",
+                );
+                let body = diags.extract_result(body.accept(self));
+                self.ctx.scope().pop();
+
+                self.constraint_to_bool(body.as_ref());
+                self.unify(
+                    span,
+                    || format!("in {quantifier_kind} expression"),
+                    &mut diags,
+                );
+
+                diags.finish(|| Expression::Quantifier {
+                    quantifier_kind: *quantifier_kind,
+                    binding: binding.with_meta(binding_type),
+                    domain: domain.unwrap(),
+                    body: Box::new(body.unwrap()),
+                    span: *span,
+                    meta: self.ctx.ts().bool_type(),
+                })
+            }
 
             //  e_0 : Array of t
             // ------------------
             //  len(e_0) : Felt
-            Expression::Len { .. } => todo!(),
+            Expression::Len { target, span, .. } => {
+                let target = diags.extract_result(target.accept(self));
+                // TODO: Add type constraint that 'target' must be an array of something.
+                diags.finish(|| Expression::Len {
+                    target: Box::new(target.unwrap()),
+                    span: *span,
+                    meta: self.ctx.ts().felt_type(),
+                })
+            }
 
             //    e : t
             // -----------
             //  old(e): t
-            Expression::Old { span, .. } if !self.cfg.allows_old => Err(vec![Diagnostic::new(
-                self.source_name,
-                "old expression is not allowed in this context",
-                Some(*span),
-            )]),
             Expression::Old {
                 expression, span, ..
             } => {
-                let expression = expression.accept(self)?;
-                let meta = expression.r#type();
-                Ok(Expression::Old {
-                    expression: Box::new(expression),
-                    span: *span,
-                    meta,
+                diags.add_unless(
+                    self.cfg.allows_old,
+                    || "old expression is not allowed in this context",
+                );
+                let expression = diags.extract_result(expression.accept(self));
+                diags.finish(|| {
+                    let expression = expression.unwrap();
+                    let meta = expression.r#type();
+                    Expression::Old {
+                        expression: Box::new(expression),
+                        span: *span,
+                        meta,
+                    }
                 })
             }
 
             //  env.parameters(n) : t
             // -----------------------
             //       arg(n) : t
-            Expression::Arg { index, span, .. } => {
-                let t = self
-                    .ctx
-                    .scope()
-                    .find_parameter(index)
-                    .cloned()
-                    .map_err(|err| {
-                        err.into_diags(
-                            self.source_name,
-                            Some(*span),
-                            format!("on argument #{index}"),
-                        )
-                    })?;
-                Ok(Expression::Arg {
+            Expression::Arg { index, span, .. } => diags
+                .to_typing_result(self.ctx.scope().find_parameter(index).cloned(), || {
+                    format!("on argument #{index}")
+                })
+                .map(|t| Expression::Arg {
                     index: *index,
                     span: *span,
                     meta: t,
-                })
-            }
+                }),
 
             // ---------------
             //  nondet : Felt
-            Expression::Nondet { span, .. } => Ok(Expression::Nondet {
+            Expression::Nondet { span, .. } => diags.finish(|| Expression::Nondet {
                 span: *span,
                 meta: self.ctx.ts().felt_type(),
             }),
@@ -392,7 +387,7 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Expression<'ast>> for ExpressionTypeChec
             //
             // --------------
             //  false : Bool
-            Expression::Boolean { value, span, .. } => Ok(Expression::Boolean {
+            Expression::Boolean { value, span, .. } => diags.finish(|| Expression::Boolean {
                 value: *value,
                 span: *span,
                 meta: self.ctx.ts().bool_type(),
@@ -401,7 +396,7 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Expression<'ast>> for ExpressionTypeChec
             //  0 <= N < P
             // ------------
             //   N : Felt
-            Expression::Number { value, span, .. } => Ok(Expression::Number {
+            Expression::Number { value, span, .. } => diags.finish(|| Expression::Number {
                 value: *value,
                 span: *span,
                 meta: self.ctx.ts().felt_type(),
@@ -410,17 +405,25 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Expression<'ast>> for ExpressionTypeChec
             //  env.locals(s) : t
             // -------------------
             //       s : t
-            Expression::Symbol(ident) => {
-                let t = self.ctx.scope().find_local(ident).cloned().map_err(|err| {
-                    err.into_diags(
-                        self.source_name,
-                        Some(ident.span()),
-                        format!("on symbol '{}'", ident.value()),
-                    )
-                })?;
-
-                Ok(Expression::Symbol(ident.with_meta(self.ctx.resolve(t))))
-            }
+            Expression::Symbol(ident) => diags
+                .to_typing_result(self.ctx.scope().find_local(ident).cloned(), || {
+                    format!("on symbol '{}'", ident.value())
+                })
+                .map(|t| Expression::Symbol(ident.with_meta(self.ctx.resolve(t)))),
         }
+    }
+}
+
+impl<'ctx, 'ast, T: TypeSystem> DerefMut for ExpressionTypeChecker<'ctx, 'ast, T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.base
+    }
+}
+
+impl<'ctx, 'ast, T: TypeSystem> Deref for ExpressionTypeChecker<'ctx, 'ast, T> {
+    type Target = BaseTypeChecker<'ctx, 'ast, T>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.base
     }
 }
