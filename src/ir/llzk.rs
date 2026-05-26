@@ -8,7 +8,6 @@ use crate::ast::Identifier;
 use crate::diagnostic::CompileError;
 use crate::ir::MlirTypeSystem;
 use crate::type_analysis::{CircuitInfo, MemberInfo, ParamInfo, StructInfo};
-use llzk::context::LlzkContext;
 use llzk::dialect::{
     array::ArrayType,
     function::{FuncDefOpLike, is_func_def},
@@ -21,15 +20,11 @@ use llzk::prelude::{
     TemplateSymbolBindingOpLike as _,
 };
 use melior::ir::{BlockLike, RegionLike, TypeLike as _, ValueLike};
-use melior::{
-    dialect::DialectRegistry,
-    ir::{
-        Module, OperationRef, Type,
-        attribute::FlatSymbolRefAttribute,
-        attribute::StringAttribute,
-        operation::{OperationLike, WalkOrder, WalkResult},
-    },
-    utility::register_all_dialects,
+use melior::ir::{
+    Module, OperationRef, Type,
+    attribute::FlatSymbolRefAttribute,
+    attribute::StringAttribute,
+    operation::{OperationLike, WalkOrder, WalkResult},
 };
 use mlir_sys::mlirOperationGetParentOperation;
 use std::collections::{HashMap, HashSet};

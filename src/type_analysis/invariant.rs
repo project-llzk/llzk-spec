@@ -1,12 +1,10 @@
 use crate::{
-    ast::{Block, InvariantDecl, Spanned as _, Statement, Visitable as _, Visitor},
-    diagnostic::Diagnostic,
+    ast::{InvariantDecl, Spanned as _, Visitable as _, Visitor},
     type_analysis::{
         TypeSystem, TypingResult,
         block::{BlockTypeChecker, BlockTypeCheckerCfg},
         ctx::TypeInferenceCtx,
-        expression::{ExpressionTypeChecker, ExpressionTypeCheckerCfg},
-        helpers::{check_many, extract_result},
+        helpers::extract_result,
     },
 };
 

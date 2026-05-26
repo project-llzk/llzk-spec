@@ -213,8 +213,6 @@ impl<T> Constraint<T> {
 mod tests {
     use std::slice;
 
-    use rstest::{fixture, rstest};
-
     use super::*;
     use crate::{
         ast::{AstContext, Identifier, Span},
@@ -223,9 +221,9 @@ mod tests {
 
     type Ctx<'ast> = TypeInferenceCtx<'ast, MockTypeSystem>;
 
-    #[fixture]
-    fn ctx<'ast>() -> Ctx<'ast> {
+    fn ctx<'ast>(ast: &'ast AstContext) -> Ctx<'ast> {
         TypeInferenceCtx {
+            ast,
             scope: ScopeStack::new(()),
             constraints: vec![],
             ts: MockTypeSystem::default(),
@@ -233,40 +231,50 @@ mod tests {
         }
     }
 
-    #[rstest]
-    fn add_constraint(mut ctx: Ctx) {
+    #[test]
+    fn add_constraint() {
+        let ast = AstContext::new();
+        let mut ctx = ctx(&ast);
         let lhs = ctx.ts().bool_type();
         let rhs = ctx.ts().fresh_var();
         ctx.add_constraint(lhs.clone(), rhs.clone());
         assert_eq!(ctx.constraints, vec![Constraint::new(lhs, rhs)]);
     }
 
-    #[rstest]
-    fn unify_1(mut ctx: Ctx) {
+    #[test]
+    fn unify_1() {
+        let ast = AstContext::new();
+        let mut ctx = ctx(&ast);
         let lhs = ctx.ts().bool_type();
         let rhs = ctx.ts().bool_type();
         ctx.add_constraint(lhs, rhs);
         ctx.unify().unwrap();
     }
 
-    #[rstest]
-    fn unify_2(mut ctx: Ctx) {
+    #[test]
+    fn unify_2() {
+        let ast = AstContext::new();
+        let mut ctx = ctx(&ast);
         let lhs = ctx.ts().felt_type();
         let rhs = ctx.ts().felt_type();
         ctx.add_constraint(lhs, rhs);
         ctx.unify().unwrap();
     }
 
-    #[rstest]
-    fn unify_3(mut ctx: Ctx) {
+    #[test]
+    fn unify_3() {
+        let ast = AstContext::new();
+        let mut ctx = ctx(&ast);
         let lhs = ctx.ts().fresh_var();
         let rhs = ctx.ts().bool_type();
         ctx.add_constraint(lhs, rhs);
         ctx.unify().unwrap();
     }
 
-    #[rstest]
-    fn unify_4(mut ctx: Ctx) {
+    #[test]
+    fn unify_4() {
+        let ast = AstContext::new();
+        let mut ctx = ctx(&ast);
         let var = ctx.ts().fresh_var();
         let b = ctx.ts().bool_type();
         let lhs = ctx.ts().func_type(&[var], slice::from_ref(&b));
@@ -275,18 +283,22 @@ mod tests {
         ctx.unify().unwrap();
     }
 
-    #[rstest]
+    #[test]
     #[should_panic]
-    fn unify_fail_1(mut ctx: Ctx) {
+    fn unify_fail_1() {
+        let ast = AstContext::new();
+        let mut ctx = ctx(&ast);
         let lhs = ctx.ts().felt_type();
         let rhs = ctx.ts().bool_type();
         ctx.add_constraint(lhs.clone(), rhs.clone());
         ctx.unify().unwrap();
     }
 
-    #[rstest]
+    #[test]
     #[should_panic]
-    fn unify_fail_2(mut ctx: Ctx) {
+    fn unify_fail_2() {
+        let ast = AstContext::new();
+        let mut ctx = ctx(&ast);
         let lhs = ctx.ts().fresh_var();
         let b = ctx.ts().bool_type();
         let rhs = ctx.ts().func_type(slice::from_ref(&lhs), &[b]);
@@ -294,9 +306,11 @@ mod tests {
         ctx.unify().unwrap();
     }
 
-    #[rstest]
+    #[test]
     #[should_panic]
-    fn unify_fail_3(mut ctx: Ctx) {
+    fn unify_fail_3() {
+        let ast = AstContext::new();
+        let mut ctx = ctx(&ast);
         let rhs = ctx.ts().fresh_var();
         let b = ctx.ts().bool_type();
         let lhs = ctx.ts().func_type(slice::from_ref(&rhs), &[b]);
@@ -304,9 +318,11 @@ mod tests {
         ctx.unify().unwrap();
     }
 
-    #[rstest]
+    #[test]
     #[should_panic(expected = "expected type 'Bool' but got 'Felt'")]
-    fn unify_fail_4(mut ctx: Ctx) {
+    fn unify_fail_4() {
+        let ast = AstContext::new();
+        let mut ctx = ctx(&ast);
         let lhs = ctx.ts().fresh_var();
         let rhs1 = ctx.ts().bool_type();
         let rhs2 = ctx.ts().felt_type();
@@ -320,8 +336,10 @@ mod tests {
         });
     }
 
-    #[rstest]
-    fn resolve_1(mut ctx: Ctx) {
+    #[test]
+    fn resolve_1() {
+        let ast = AstContext::new();
+        let mut ctx = ctx(&ast);
         let lhs = ctx.ts().fresh_var();
         let rhs = ctx.ts().bool_type();
         ctx.add_constraint(lhs.clone(), rhs.clone());
@@ -329,8 +347,10 @@ mod tests {
         assert_eq!(ctx.resolve(lhs), rhs);
     }
 
-    #[rstest]
-    fn resolve_2(mut ctx: Ctx) {
+    #[test]
+    fn resolve_2() {
+        let ast = AstContext::new();
+        let mut ctx = ctx(&ast);
         let lhs = ctx.ts().fresh_var();
         let xxx = ctx.ts().fresh_var();
         let rhs = ctx.ts().bool_type();
@@ -344,7 +364,7 @@ mod tests {
     fn propagate_1() {
         let ast_ctx = AstContext::new();
         let name = Identifier::new(ast_ctx.symbol("x"), Span::default());
-        let mut ctx = ctx();
+        let mut ctx = ctx(&ast_ctx);
 
         let lhs = ctx.ts().fresh_var();
         let rhs = ctx.ts().bool_type();
@@ -366,7 +386,7 @@ mod tests {
     fn propagate_2() {
         let ast_ctx = AstContext::new();
         let name = Identifier::new(ast_ctx.symbol("x"), Span::default());
-        let mut ctx = ctx();
+        let mut ctx = ctx(&ast_ctx);
 
         let lhs = ctx.ts().fresh_var();
         let other = ctx.ts().fresh_var();
