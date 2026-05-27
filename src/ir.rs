@@ -9,7 +9,9 @@ use melior::ir::Module;
 use crate::{
     ast::Span,
     diagnostic::CompileError,
-    type_analysis::{ArrayTypeProperties, FnTypeProperties, TypeProperties, TypeSystem},
+    type_analysis::{
+        ArrayTypeProperties, FnTypeProperties, StructTypeProperties, TypeProperties, TypeSystem,
+    },
 };
 
 /// Context supporting IR handling and generation.
@@ -115,6 +117,8 @@ impl<'ctx> TypeSystem for MlirTypeSystem<'ctx> {
 
     type ArrayType = ArrayType<'ctx>;
 
+    type StructType = WrapStructLike<'ctx>;
+
     fn bool_type(&mut self) -> Self::Type {
         self.ctx.bool_type()
     }
@@ -137,6 +141,7 @@ impl<'ctx> TypeSystem for MlirTypeSystem<'ctx> {
 impl<'ctx> TypeProperties for Type<'ctx> {
     type FnType = WrapFunctionType<'ctx>;
     type ArrayType = ArrayType<'ctx>;
+    type StructType = WrapStructLike<'ctx>;
 
     type VarId = &'ctx str;
 
@@ -173,6 +178,20 @@ impl<'ctx> TypeProperties for Type<'ctx> {
         }
         types_unify(*self, *other)
     }
+
+    fn is_struct_type(&self) -> bool {
+        is_struct_type(*self) || is_pod_type(*self)
+    }
+
+    fn to_struct_type(&self) -> Option<Self::StructType> {
+        if let Ok(t) = StructType::try_from(*self) {
+            Some(WrapStructLike::Struct(t))
+        } else if let Ok(t) = PodType::try_from(*self) {
+            Some(WrapStructLike::Pod(t))
+        } else {
+            None
+        }
+    }
 }
 
 impl<'ctx> ArrayTypeProperties for ArrayType<'ctx> {
@@ -184,6 +203,10 @@ impl<'ctx> ArrayTypeProperties for ArrayType<'ctx> {
 
     fn contains_type_vars(&self) -> bool {
         self.element_type().contains_type_vars()
+    }
+
+    fn map_inner(&self, inner: Self::Type) -> Self {
+        ArrayType::new(inner, &self.dims())
     }
 }
 
@@ -235,5 +258,102 @@ impl std::fmt::Display for WrapFunctionType<'_> {
 impl std::fmt::Debug for WrapFunctionType<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         std::fmt::Debug::fmt(&self.0, f)
+    }
+}
+
+/// Wrapper over struct and pod types since from the point of view of the spec language they are
+/// equivalent.
+#[derive(Copy, Clone)]
+pub enum WrapStructLike<'ctx> {
+    Struct(StructType<'ctx>),
+    Pod(PodType<'ctx>),
+}
+
+impl WrapStructLike<'_> {
+    fn to_raw(&self) -> mlir_sys::MlirType {
+        match self {
+            WrapStructLike::Struct(t) => t.to_raw(),
+            WrapStructLike::Pod(t) => t.to_raw(),
+        }
+    }
+}
+
+impl<'ctx> From<WrapStructLike<'ctx>> for Type<'ctx> {
+    fn from(value: WrapStructLike<'ctx>) -> Self {
+        match value {
+            WrapStructLike::Struct(t) => t.into(),
+            WrapStructLike::Pod(t) => t.into(),
+        }
+    }
+}
+
+impl PartialEq for WrapStructLike<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        unsafe { mlir_sys::mlirTypeEqual(self.to_raw(), other.to_raw()) }
+    }
+}
+
+impl std::fmt::Display for WrapStructLike<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            WrapStructLike::Struct(t) => std::fmt::Display::fmt(t, f),
+            WrapStructLike::Pod(t) => std::fmt::Display::fmt(t, f),
+        }
+    }
+}
+
+impl std::fmt::Debug for WrapStructLike<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            WrapStructLike::Struct(t) => std::fmt::Debug::fmt(t, f),
+            WrapStructLike::Pod(t) => std::fmt::Debug::fmt(t, f),
+        }
+    }
+}
+
+impl<'ctx> StructTypeProperties for WrapStructLike<'ctx> {
+    type Type = Type<'ctx>;
+
+    fn contains_type_vars(&self) -> bool {
+        match self {
+            WrapStructLike::Struct(_) => todo!(),
+            WrapStructLike::Pod(t) => t
+                .get_records()
+                .iter()
+                .any(|r| r.r#type().contains_type_vars()),
+        }
+    }
+
+    fn get_member(&self, member: &str) -> Option<Type<'ctx>> {
+        match self {
+            WrapStructLike::Struct(_) => todo!(),
+            WrapStructLike::Pod(t) => t.get_type_of_record(member),
+        }
+    }
+
+    fn members(&self) -> Vec<Type<'ctx>> {
+        match self {
+            WrapStructLike::Struct(_) => todo!(),
+            WrapStructLike::Pod(t) => t.get_records().into_iter().map(|r| r.r#type()).collect(),
+        }
+    }
+
+    fn map_members(&self, mut map: impl FnMut(&Self::Type) -> Self::Type) -> Self {
+        match self {
+            WrapStructLike::Struct(_) => todo!(),
+            WrapStructLike::Pod(t) => {
+                let ctx = t.context();
+                let records = t
+                    .get_records()
+                    .into_iter()
+                    .map(|r| {
+                        let name = r.name();
+                        let name = name.as_string_ref().as_str().unwrap();
+                        PodRecordAttribute::new(name, map(&r.r#type()))
+                    })
+                    .collect::<Vec<_>>();
+                WrapStructLike::Pod(PodType::new(unsafe { ctx.to_ref() }, &records))
+            }
+        }
     }
 }

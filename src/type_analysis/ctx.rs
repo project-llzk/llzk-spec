@@ -3,7 +3,8 @@ use std::collections::HashMap;
 use crate::{
     ast::{AstContext, Symbol},
     type_analysis::{
-        FnTypeProperties, TypeProperties, TypeSystem, error::TypeAnalysisError, scope::ScopeStack,
+        ArrayTypeProperties, FnTypeProperties, StructTypeProperties as _, TypeProperties,
+        TypeSystem, error::TypeAnalysisError, scope::ScopeStack,
     },
 };
 
@@ -14,7 +15,7 @@ pub(super) type Subst<T> =
 /// Shared type inference context used during type-checking.
 pub(super) struct TypeInferenceCtx<'ast, T: TypeSystem> {
     scope: ScopeStack<'ast, T::Type, T::FnType>,
-    constraints: Vec<Constraint<T::Type>>,
+    constraints: Vec<Constraint<'ast, T::Type>>,
     ts: T,
     ast: &'ast AstContext,
     subst: Subst<T>,
@@ -52,6 +53,24 @@ impl<'ast, T: TypeSystem> TypeInferenceCtx<'ast, T> {
         self.constraints.push(Constraint::new(lhs, rhs))
     }
 
+    /// Enqueues an array constraint that will get solved on the next call to unify.
+    pub fn add_array_constraint(&mut self, arr: T::Type, elt: T::Type) {
+        // If the types are equal we don't bother adding it.
+        if let Some(arr) = arr.to_array_type()
+            && arr.inner_type() == elt
+        {
+            return;
+        }
+
+        self.constraints.push(Constraint::new_array(arr, elt))
+    }
+
+    /// Enqueues a member constraint that will get solved on the next call to unify.
+    pub fn add_member_constraint(&mut self, str: T::Type, name: Symbol<'ast>, mem: T::Type) {
+        self.constraints
+            .push(Constraint::new_member(str, name, mem))
+    }
+
     /// Resolves the given type to its most concrete representation.
     pub fn resolve(&mut self, t: T::Type) -> T::Type {
         Self::apply(&t, &self.subst, &mut self.ts)
@@ -62,7 +81,13 @@ impl<'ast, T: TypeSystem> TypeInferenceCtx<'ast, T> {
         let mut errs = vec![];
 
         for c in std::mem::take(&mut self.constraints) {
-            self.unify_pair(&c.lhs, &c.rhs, &mut errs);
+            match c {
+                Constraint::Eq { lhs, rhs } => self.unify_pair(&lhs, &rhs, &mut errs),
+                Constraint::Array { arr, elt } => self.unify_array_pair(&arr, &elt, &mut errs),
+                Constraint::Member { str, name, mem } => {
+                    self.unify_member_pair(&str, name, &mem, &mut errs)
+                }
+            };
         }
 
         self.scope.propagate(&self.subst, &mut self.ts);
@@ -110,6 +135,43 @@ impl<'ast, T: TypeSystem> TypeInferenceCtx<'ast, T> {
         ))
     }
 
+    /// Handles unification of an array type constraint.
+    fn unify_array_pair(
+        &mut self,
+        arr: &T::Type,
+        elt: &T::Type,
+        errs: &mut Vec<TypeAnalysisError>,
+    ) {
+        let Some(arr) = arr.to_array_type() else {
+            errs.push(TypeAnalysisError::ExpectedArray(arr.to_string()));
+            return;
+        };
+        self.unify_pair(&arr.inner_type(), elt, errs)
+    }
+
+    /// Handles unification of a member type constraint.
+    fn unify_member_pair(
+        &mut self,
+        str: &T::Type,
+        name: Symbol<'ast>,
+        mem: &T::Type,
+        errs: &mut Vec<TypeAnalysisError>,
+    ) {
+        let Some(str) = str.to_struct_type() else {
+            errs.push(TypeAnalysisError::ExpectedStruct(str.to_string()));
+            return;
+        };
+
+        let Some(actual) = str.get_member(name.value()) else {
+            errs.push(TypeAnalysisError::ExpectedMember(
+                str.to_string(),
+                name.to_string(),
+            ));
+            return;
+        };
+        self.unify_pair(&actual, mem, errs);
+    }
+
     /// Handles unification of a constraint between function types.
     fn unify_fn_pair(&mut self, lhs: T::FnType, rhs: T::FnType, errs: &mut Vec<TypeAnalysisError>) {
         if lhs.inputs().len() != rhs.inputs().len() || lhs.outputs().len() != rhs.outputs().len() {
@@ -144,18 +206,25 @@ impl<'ast, T: TypeSystem> TypeInferenceCtx<'ast, T> {
 
     /// Applies substitutions until the most concrete type available is found.
     fn apply(t: &T::Type, subst: &Subst<T>, ts: &mut T) -> T::Type {
-        if t.is_var_type() {
+        if let Some(var_id) = t.var_id() {
             return subst
-                .get(&t.var_id().unwrap())
+                .get(&var_id)
                 .map(|t| Self::apply(t, subst, ts))
                 .unwrap_or_else(|| t.clone());
         }
 
-        if t.is_func_type() {
-            let t = t.to_func_type().unwrap();
+        if let Some(t) = t.to_func_type() {
             let ins = Self::apply_many(t.inputs(), subst, ts);
             let outs = Self::apply_many(t.outputs(), subst, ts);
             return ts.func_type(&ins, &outs).into();
+        }
+
+        if let Some(t) = t.to_array_type() {
+            return t.map_inner(Self::apply(&t.inner_type(), subst, ts)).into();
+        }
+
+        if let Some(t) = t.to_struct_type() {
+            return t.map_members(|t| Self::apply(t, subst, ts)).into();
         }
 
         t.clone()
@@ -178,8 +247,8 @@ impl<'ast, T: TypeSystem> TypeInferenceCtx<'ast, T> {
         ts: &mut T,
     ) -> bool {
         let t = Self::apply(t, subst, ts);
-        if t.is_var_type() {
-            return id == t.var_id().unwrap();
+        if let Some(other) = t.var_id() {
+            return id == other;
         }
 
         if let Some(t) = t.to_func_type() {
@@ -188,6 +257,14 @@ impl<'ast, T: TypeSystem> TypeInferenceCtx<'ast, T> {
                 .iter()
                 .chain(t.outputs().iter())
                 .any(|i| Self::occurs(id, i, subst, ts));
+        }
+
+        if let Some(t) = t.to_array_type() {
+            return Self::occurs(id, &t.inner_type(), subst, ts);
+        }
+
+        if let Some(t) = t.to_struct_type() {
+            return t.members().iter().any(|i| Self::occurs(id, i, subst, ts));
         }
 
         false
@@ -205,15 +282,31 @@ impl<'ast, T: TypeSystem> TypeInferenceCtx<'ast, T> {
 
 /// A type constraint between two types.
 #[derive(PartialEq, Eq, Debug)]
-struct Constraint<T> {
-    lhs: T,
-    rhs: T,
+enum Constraint<'ast, T> {
+    /// Type equality constraint
+    Eq { lhs: T, rhs: T },
+    /// Constraints that `elt` must be equal to the element type of `arr` and that the latter is an
+    /// array type.
+    Array { arr: T, elt: T },
+    /// Constraints that `str` must be a struct-like type that has a member with that name and that
+    /// `mem` has the same type as the member.
+    Member { str: T, name: Symbol<'ast>, mem: T },
 }
 
-impl<T> Constraint<T> {
-    /// Creates a new constraint.
+impl<'ast, T> Constraint<'ast, T> {
+    /// Creates a new equality constraint.
     fn new(lhs: T, rhs: T) -> Self {
-        Self { lhs, rhs }
+        Self::Eq { lhs, rhs }
+    }
+
+    /// Creates a new array constraint.
+    fn new_array(arr: T, elt: T) -> Self {
+        Self::Array { arr, elt }
+    }
+
+    /// Creates a new member constraint.
+    fn new_member(str: T, name: Symbol<'ast>, mem: T) -> Self {
+        Self::Member { str, name, mem }
     }
 }
 

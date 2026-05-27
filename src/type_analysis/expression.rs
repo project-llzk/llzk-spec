@@ -144,16 +144,19 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Expression<'ast>> for ExpressionTypeChec
                 let target = diags.extract_result(target.accept(self));
                 let index = diags.extract_result(index.accept(self));
 
-                self.constraint_to_felt(index.as_ref());
                 let result_type = self.ctx.ts().fresh_var();
-                // TODO: Constraint 'target' to be an Array of 'result_type'
+                self.constraint_to_felt(index.as_ref());
+                if let Some(target) = target.as_ref() {
+                    self.ctx
+                        .add_array_constraint(target.r#type(), result_type.clone());
+                }
 
                 self.unify(span, || "on index expression", &mut diags);
                 diags.finish(|| Expression::Index {
                     target: Box::new(target.unwrap()),
                     index: Box::new(index.unwrap()),
                     span: *span,
-                    meta: result_type,
+                    meta: self.ctx.resolve(result_type),
                 })
             }
 
@@ -161,11 +164,7 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Expression<'ast>> for ExpressionTypeChec
             // ------------------------
             //        e.m : t_1
             //
-            // 't_0' is a sub-type of an anonymous struct-like type that has a member 'm' of type
-            // 't_1'. In plain English, 't_0' has a member 'm' whose type we constraint to be
-            // 't_1'.
-            //
-            // TODO: Currently, that rule above is not checked.
+            // t_0' has a member 'm' whose type is constrained to be 't_1'.
             Expression::Member {
                 target,
                 member,
@@ -174,13 +173,22 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Expression<'ast>> for ExpressionTypeChec
             } => {
                 let target = diags.extract_result(target.accept(self));
                 let result_type = self.ctx.ts().fresh_var();
-
+                if let Some(target) = target.as_ref() {
+                    self.ctx.add_member_constraint(
+                        target.r#type(),
+                        member.symbol(),
+                        result_type.clone(),
+                    );
+                }
                 self.unify(span, || "on member access expression", &mut diags);
-                diags.finish(|| Expression::Member {
-                    target: Box::new(target.unwrap()),
-                    member: member.with_meta(result_type.clone()),
-                    span: *span,
-                    meta: result_type,
+                diags.finish(|| {
+                    let result_type = self.ctx.resolve(result_type);
+                    Expression::Member {
+                        target: Box::new(target.unwrap()),
+                        member: member.with_meta(result_type.clone()),
+                        span: *span,
+                        meta: result_type,
+                    }
                 })
             }
 
@@ -230,9 +238,9 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Expression<'ast>> for ExpressionTypeChec
                 );
 
                 diags.finish(|| Expression::Call {
-                    callee: callee.with_meta(callee_type.into()),
+                    callee: callee.with_meta(self.ctx.resolve(callee_type.into())),
                     // If diags is empty then these should be Some.
-                    args: new_args.into_iter().map(Option::unwrap).collect(),
+                    args: new_args.into_iter().flatten().collect(),
                     span: *span,
                     meta: bool_type,
                 })
@@ -287,10 +295,11 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Expression<'ast>> for ExpressionTypeChec
                     QuantifierDomain::Expr(expression) => {
                         // Bind the quantifier's local to a fresh variable.
                         let binding_type = self.ctx.ts().fresh_var();
-                        // The expression must be of type Array of the fresh variable.
-                        // But actually checking that is a TODO because Array types are not super
-                        // stable right now.
                         let expr = diags.extract_result(expression.accept(self));
+                        if let Some(expr) = expr.as_ref() {
+                            self.ctx
+                                .add_array_constraint(expr.r#type(), binding_type.clone());
+                        }
                         (
                             binding_type,
                             expr.map(|expr| QuantifierDomain::Expr(Box::new(expr))),
@@ -317,7 +326,7 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Expression<'ast>> for ExpressionTypeChec
 
                 diags.finish(|| Expression::Quantifier {
                     quantifier_kind: *quantifier_kind,
-                    binding: binding.with_meta(binding_type),
+                    binding: binding.with_meta(self.ctx.resolve(binding_type)),
                     domain: domain.unwrap(),
                     body: Box::new(body.unwrap()),
                     span: *span,
@@ -330,7 +339,11 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Expression<'ast>> for ExpressionTypeChec
             //  len(e_0) : Felt
             Expression::Len { target, span, .. } => {
                 let target = diags.extract_result(target.accept(self));
-                // TODO: Add type constraint that 'target' must be an array of something.
+                if let Some(target) = target.as_ref() {
+                    let v = self.ctx.ts().fresh_var();
+                    self.ctx.add_array_constraint(target.r#type(), v);
+                }
+                self.unify(span, || "on lenght expression", &mut diags);
                 diags.finish(|| Expression::Len {
                     target: Box::new(target.unwrap()),
                     span: *span,

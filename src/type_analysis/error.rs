@@ -23,6 +23,12 @@ pub enum TypeAnalysisError {
     UnexpectedTypes(String, String),
     #[error("type '{0}' is infinite")]
     InfiniteType(String),
+    #[error("expected an array type but got '{0}'")]
+    ExpectedArray(String),
+    #[error("expected a struct like type but got '{0}'")]
+    ExpectedStruct(String),
+    #[error("member '{1}' not found in type '{0}'")]
+    ExpectedMember(String, String),
 }
 
 impl TypeAnalysisError {

@@ -1,5 +1,7 @@
 //! Test helpers and high level tests.
 
+use std::collections::HashMap;
+
 use super::*;
 
 #[derive(Default)]
@@ -32,6 +34,8 @@ impl TypeSystem for MockTypeSystem {
         self.next_var += 1;
         MockType::Var(id)
     }
+
+    type StructType = MockStructType;
 }
 
 pub type TypeVarId = usize;
@@ -43,6 +47,7 @@ pub enum MockType {
     Fun(MockFnType),
     Array(MockArrayType),
     Var(TypeVarId),
+    Struct(MockStructType),
 }
 
 impl From<MockFnType> for MockType {
@@ -57,6 +62,12 @@ impl From<MockArrayType> for MockType {
     }
 }
 
+impl From<MockStructType> for MockType {
+    fn from(value: MockStructType) -> Self {
+        Self::Struct(value)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MockFnType {
     ins: Vec<MockType>,
@@ -68,6 +79,11 @@ pub struct MockArrayType {
     inner: Box<MockType>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MockStructType {
+    members: HashMap<String, MockType>,
+}
+
 impl std::fmt::Display for MockType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -76,6 +92,7 @@ impl std::fmt::Display for MockType {
             MockType::Fun(fun) => write!(f, "{fun}"),
             MockType::Var(id) => write!(f, "τ{id}"),
             MockType::Array(a) => write!(f, "{a}"),
+            MockType::Struct(s) => write!(f, "{s}"),
         }
     }
 }
@@ -112,6 +129,16 @@ impl std::fmt::Display for MockFnType {
     }
 }
 
+impl std::fmt::Display for MockStructType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{{")?;
+        self.members
+            .iter()
+            .try_for_each(|(name, t)| write!(f, "{name}: {t}, "))?;
+        write!(f, "}}")
+    }
+}
+
 impl FnTypeProperties for MockFnType {
     type Type = MockType;
 
@@ -132,6 +159,7 @@ impl FnTypeProperties for MockFnType {
 impl TypeProperties for MockType {
     type FnType = MockFnType;
     type ArrayType = MockArrayType;
+    type StructType = MockStructType;
 
     type VarId = TypeVarId;
 
@@ -172,6 +200,17 @@ impl TypeProperties for MockType {
         // The mock type does not have coercible types so they resolve via equality.
         self == other
     }
+
+    fn is_struct_type(&self) -> bool {
+        matches!(self, Self::Struct(_))
+    }
+
+    fn to_struct_type(&self) -> Option<Self::StructType> {
+        match self {
+            MockType::Struct(s) => Some(s.clone()),
+            _ => None,
+        }
+    }
 }
 
 impl ArrayTypeProperties for MockArrayType {
@@ -183,5 +222,37 @@ impl ArrayTypeProperties for MockArrayType {
 
     fn contains_type_vars(&self) -> bool {
         self.inner.contains_type_vars()
+    }
+
+    fn map_inner(&self, inner: Self::Type) -> Self {
+        Self {
+            inner: Box::new(inner),
+        }
+    }
+}
+
+impl StructTypeProperties for MockStructType {
+    type Type = MockType;
+
+    fn contains_type_vars(&self) -> bool {
+        self.members.values().any(|t| t.contains_type_vars())
+    }
+
+    fn get_member(&self, name: &str) -> Option<Self::Type> {
+        self.members.get(name).cloned()
+    }
+
+    fn members(&self) -> Vec<Self::Type> {
+        self.members.values().cloned().collect()
+    }
+
+    fn map_members(&self, mut map: impl FnMut(&Self::Type) -> Self::Type) -> Self {
+        Self {
+            members: self
+                .members
+                .iter()
+                .map(|(name, t)| (name.clone(), map(t)))
+                .collect(),
+        }
     }
 }

@@ -133,6 +133,14 @@ pub trait TypeSystem {
         + Into<Self::Type>
         + ArrayTypeProperties<Type = Self::Type>;
 
+    /// Type used for representing struct-like types.
+    type StructType: Clone
+        + PartialEq
+        + std::fmt::Display
+        + std::fmt::Debug
+        + Into<Self::Type>
+        + StructTypeProperties<Type = Self::Type>;
+
     /// Create a boolean type.
     fn bool_type(&mut self) -> Self::Type;
 
@@ -167,8 +175,28 @@ pub trait FnTypeProperties {
     fn contains_type_vars(&self) -> bool;
 }
 
+/// Trait for obtaining information about struct types.
+pub trait StructTypeProperties {
+    /// Type used to represent generic types.
+    type Type;
+
+    /// Returns true if the array has type vars.
+    fn contains_type_vars(&self) -> bool;
+
+    /// Returns the type of a member in the struct.
+    ///
+    /// If the type does not have a member by that name returns `None`.
+    fn get_member(&self, name: &str) -> Option<Self::Type>;
+
+    /// Returns the list of members in the struct.
+    fn members(&self) -> Vec<Self::Type>;
+
+    /// Changes the types of the members.
+    fn map_members(&self, map: impl FnMut(&Self::Type) -> Self::Type) -> Self;
+}
+
 /// Trait for obtaining information about types.
-pub trait TypeProperties {
+pub trait TypeProperties: Sized {
     /// Type used to represent function types.
     type FnType: FnTypeProperties<Type = Self>;
 
@@ -176,7 +204,10 @@ pub trait TypeProperties {
     type VarId: Copy + Clone + PartialEq + Eq + std::fmt::Debug + std::hash::Hash;
 
     /// Type used to represent array types.
-    type ArrayType: ArrayTypeProperties<Type = Self>;
+    type ArrayType: ArrayTypeProperties<Type = Self> + Into<Self> + std::fmt::Display;
+
+    /// Type used to represent struct types.
+    type StructType: StructTypeProperties<Type = Self> + Into<Self> + std::fmt::Display;
 
     /// Returns true if the type is representing a type variable.
     fn is_var_type(&self) -> bool;
@@ -196,6 +227,10 @@ pub trait TypeProperties {
             || (self.is_func_type() && self.to_func_type().is_some_and(|f| f.contains_type_vars()))
             || (self.is_array_type()
                 && self.to_array_type().is_some_and(|a| a.contains_type_vars()))
+            || (self.is_struct_type()
+                && self
+                    .to_struct_type()
+                    .is_some_and(|s| s.contains_type_vars()))
     }
 
     /// Returns true if the type is an array type.
@@ -203,6 +238,12 @@ pub trait TypeProperties {
 
     /// Converts the type into the concrete array type representation.
     fn to_array_type(&self) -> Option<Self::ArrayType>;
+
+    /// Returns true if the type is a struct-like type.
+    fn is_struct_type(&self) -> bool;
+
+    /// Converts the type into the concrete struct-like type representation.
+    fn to_struct_type(&self) -> Option<Self::StructType>;
 
     /// Return true if the types can resolve their unification.
     ///
@@ -221,6 +262,9 @@ pub trait ArrayTypeProperties {
 
     /// Returns true if the array has type vars.
     fn contains_type_vars(&self) -> bool;
+
+    /// Changes the inner type of the array.
+    fn map_inner(&self, inner: Self::Type) -> Self;
 }
 
 /// Trait that gives information about the circuit the spec is targeting.
