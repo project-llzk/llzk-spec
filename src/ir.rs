@@ -152,7 +152,7 @@ impl<'ctx> TypeProperties for Type<'ctx> {
     fn var_id(&self) -> Option<Self::VarId> {
         TVarType::try_from(*self)
             .ok()
-            .and_then(|t| unsafe { std::mem::transmute(t.name().as_str().ok()) })
+            .and_then(|t| t.name().as_str().ok())
     }
 
     fn is_func_type(&self) -> bool {
