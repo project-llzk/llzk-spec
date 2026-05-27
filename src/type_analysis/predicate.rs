@@ -89,15 +89,12 @@ impl<'ctx, 'ast, T: TypeSystem> PredicateTypeChecker<'ctx, 'ast, T> {
         // Push a local limit scope to avoid inner predicates accessing outer locals.
         self.ctx.scope().push_local_limit(());
         // Bind the formals to the new scope.
-        for (formal_no, (formal, r#type)) in std::iter::zip(decl.params(), &ins).enumerate() {
+        for (formal, r#type) in std::iter::zip(decl.params(), &ins) {
             diags.extract_type_result(
-                self.ctx
-                    .scope()
-                    .top()
-                    .bind_parameter(formal, r#type.clone(), formal_no),
+                self.ctx.scope().top().bind_local(formal, r#type.clone()),
                 || {
                     format!(
-                        "on parameter #{formal_no} '{}' of predicate '{}'",
+                        "on parameter '{}' of predicate '{}'",
                         formal.value(),
                         decl.name().value()
                     )
@@ -143,6 +140,7 @@ impl<'ctx, 'ast, T: TypeSystem> PredicateTypeChecker<'ctx, 'ast, T> {
             allows_ensure_and_require: false,
             allows_return: true,
             allows_invariant_stmts: false,
+            allows_arg: false,
         }
     }
 }

@@ -32,6 +32,7 @@ impl<'ctx, 'ast, T: TypeSystem> InvariantTypeChecker<'ctx, 'ast, T> {
             allows_ensure_and_require: true,
             allows_return: false,
             allows_invariant_stmts: true,
+            allows_arg: true,
         }
     }
 

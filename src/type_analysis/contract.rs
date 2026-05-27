@@ -50,6 +50,7 @@ where
             allows_ensure_and_require: true,
             allows_return: false,
             allows_invariant_stmts: false,
+            allows_arg: true,
         }
     }
 

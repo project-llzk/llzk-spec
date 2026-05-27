@@ -24,6 +24,8 @@ pub(super) struct BlockTypeCheckerCfg {
     pub allows_return: bool,
     /// Whether increases, decreases, and step statements are allowed in this context.
     pub allows_invariant_stmts: bool,
+    /// Whether the `arg` expression is allowed.
+    pub allows_arg: bool,
 }
 
 /// Configurable type checker of generic blocks of code.
@@ -70,6 +72,7 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Statement<'ast>> for BlockTypeChecker<'c
 
     fn visit(&mut self, statement: &Statement<'ast>) -> Self::Output {
         let mut diags = Diagnostics::new(self.source_name, statement);
+        let allows_arg = self.cfg.allows_arg;
         match statement {
             Statement::Scoped {
                 scope,
@@ -101,7 +104,8 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Statement<'ast>> for BlockTypeChecker<'c
                 diags.add_unless(self.cfg.allows_ensure_and_require, || {
                     stmt_not_allowed!("require")
                 });
-                let mut expr_tc = ExpressionTypeChecker::new(self.source_name, self.ctx);
+                let mut expr_tc =
+                    ExpressionTypeChecker::new(self.source_name, self.ctx, allows_arg);
                 let expression = diags.extract_result(expression.accept(&mut expr_tc));
                 self.constraint_to_bool(expression.as_ref());
                 self.unify(span, || "on require statement", &mut diags);
@@ -118,7 +122,8 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Statement<'ast>> for BlockTypeChecker<'c
                 diags.add_unless(self.cfg.allows_ensure_and_require, || {
                     stmt_not_allowed!("ensure")
                 });
-                let mut expr_tc = ExpressionTypeChecker::new(self.source_name, self.ctx);
+                let mut expr_tc =
+                    ExpressionTypeChecker::new(self.source_name, self.ctx, allows_arg);
                 let expression = diags.extract_result(expression.accept(&mut expr_tc));
                 self.constraint_to_bool(expression.as_ref());
                 self.unify(span, || "on ensure statement", &mut diags);
@@ -128,7 +133,8 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Statement<'ast>> for BlockTypeChecker<'c
                 })
             }
             Statement::Let { name, value, span } => {
-                let mut expr_tc = ExpressionTypeChecker::new(self.source_name, self.ctx);
+                let mut expr_tc =
+                    ExpressionTypeChecker::new(self.source_name, self.ctx, allows_arg);
                 let value = diags.extract_result(value.accept(&mut expr_tc));
                 if let Some(value) = value.as_ref() {
                     diags.extract_type_result(
@@ -158,7 +164,8 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Statement<'ast>> for BlockTypeChecker<'c
 
             Statement::Return { expression, span } => {
                 diags.add_unless(self.cfg.allows_return, || stmt_not_allowed!("return"));
-                let mut expr_tc = ExpressionTypeChecker::new(self.source_name, self.ctx);
+                let mut expr_tc =
+                    ExpressionTypeChecker::new(self.source_name, self.ctx, allows_arg);
                 let expression = diags.extract_result(expression.accept(&mut expr_tc));
                 diags.finish(|| Statement::Return {
                     expression: expression.unwrap(),
@@ -173,7 +180,8 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Statement<'ast>> for BlockTypeChecker<'c
                 diags.add_unless(self.cfg.allows_invariant_stmts, || {
                     stmt_not_allowed!("increases")
                 });
-                let mut expr_tc = ExpressionTypeChecker::new(self.source_name, self.ctx);
+                let mut expr_tc =
+                    ExpressionTypeChecker::new(self.source_name, self.ctx, allows_arg);
                 let expr = diags.extract_result(expression.accept(&mut expr_tc));
                 self.constraint_to_felt(expr.as_ref());
                 self.unify(span, || "on increases statement", &mut diags);
@@ -190,7 +198,8 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Statement<'ast>> for BlockTypeChecker<'c
                 diags.add_unless(self.cfg.allows_invariant_stmts, || {
                     stmt_not_allowed!("decreases")
                 });
-                let mut expr_tc = ExpressionTypeChecker::new(self.source_name, self.ctx);
+                let mut expr_tc =
+                    ExpressionTypeChecker::new(self.source_name, self.ctx, allows_arg);
                 let expr = diags.extract_result(expression.accept(&mut expr_tc));
                 self.constraint_to_felt(expr.as_ref());
                 self.unify(span, || "on decreases statement", &mut diags);
@@ -210,7 +219,10 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Statement<'ast>> for BlockTypeChecker<'c
                 let mut expr_tc = ExpressionTypeChecker::new_with_cfg(
                     self.source_name,
                     self.ctx,
-                    ExpressionTypeCheckerCfg { allows_old: true },
+                    ExpressionTypeCheckerCfg {
+                        allows_old: true,
+                        allows_arg,
+                    },
                 );
                 let expr = diags.extract_result(expression.accept(&mut expr_tc));
                 self.constraint_to_bool(expr.as_ref());

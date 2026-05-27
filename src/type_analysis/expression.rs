@@ -11,11 +11,16 @@ use crate::{
 pub(super) struct ExpressionTypeCheckerCfg {
     /// Whether the `old` expression is allowed.
     pub allows_old: bool,
+    /// Whether the `arg` expression is allowed.
+    pub allows_arg: bool,
 }
 
-impl Default for ExpressionTypeCheckerCfg {
-    fn default() -> Self {
-        Self { allows_old: false }
+impl ExpressionTypeCheckerCfg {
+    fn new(allows_arg: bool) -> Self {
+        Self {
+            allows_old: false,
+            allows_arg,
+        }
     }
 }
 
@@ -27,8 +32,12 @@ pub(super) struct ExpressionTypeChecker<'ctx, 'ast, T: TypeSystem> {
 
 impl<'ctx, 'ast, T: TypeSystem> ExpressionTypeChecker<'ctx, 'ast, T> {
     /// Creates a new expression type checker with default configuration.
-    pub fn new(source_name: &'ast str, ctx: &'ctx mut TypeInferenceCtx<'ast, T>) -> Self {
-        Self::new_with_cfg(source_name, ctx, Default::default())
+    pub fn new(
+        source_name: &'ast str,
+        ctx: &'ctx mut TypeInferenceCtx<'ast, T>,
+        allows_arg: bool,
+    ) -> Self {
+        Self::new_with_cfg(source_name, ctx, ExpressionTypeCheckerCfg::new(allows_arg))
     }
 
     /// Creates a new expression type checker.
@@ -376,15 +385,21 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Expression<'ast>> for ExpressionTypeChec
             //  env.parameters(n) : t
             // -----------------------
             //       arg(n) : t
-            Expression::Arg { index, span, .. } => diags
-                .to_typing_result(self.ctx.scope().find_parameter(index).cloned(), || {
-                    format!("on argument #{index}")
-                })
-                .map(|t| Expression::Arg {
-                    index: *index,
-                    span: *span,
-                    meta: t,
-                }),
+            Expression::Arg { index, span, .. } => {
+                diags.add_unless(
+                    self.cfg.allows_arg,
+                    || "arg expression is not allowed in this context",
+                );
+                diags
+                    .to_typing_result(self.ctx.scope().find_parameter(index).cloned(), || {
+                        format!("on argument #{index}")
+                    })
+                    .map(|t| Expression::Arg {
+                        index: *index,
+                        span: *span,
+                        meta: t,
+                    })
+            }
 
             // ---------------
             //  nondet : Felt
