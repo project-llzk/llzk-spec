@@ -3,6 +3,8 @@
 //! Only emitting IR to a separate file is currently supported. In the future we want to support
 //! emitting IR inlined with an existing LLZK module.
 
+use std::slice;
+
 use llzk::{
     builder::OpBuilder,
     dialect::{bool, felt, function, llzk::nondet},
@@ -148,6 +150,11 @@ impl<'ast, 'ctx> ast::Visitor<TypedBlock<'ast, 'ctx>> for SpecCodegen<'ast, 'ctx
     }
 }
 
+/// This macro call [`unreachable!`] with a message stating that the given statement cannot be
+/// defined in the given scope.
+///
+/// The type-checking pass must have emitted the correct errors for those cases, thus making them
+/// impossible during IR emission.
 macro_rules! stmt_not_allowed {
     ($stmt:literal, $scope:literal) => {
         unreachable!(concat!(
@@ -302,8 +309,14 @@ impl<'ast, 'ctx, 'blk> ast::Visitor<TypedExpression<'ast, 'ctx>> for SpecCodegen
                 callee, args, meta, ..
             } => {
                 let args = self.visit_many(args)?;
-                let name = self.find_actual_function_name(callee)?;
-                let op = function::call(self.builder(), location, name, &args, &[*meta])?;
+                let callee = self.find_actual_function_name(callee)?;
+                let op = function::call(
+                    self.builder(),
+                    location,
+                    callee,
+                    &args,
+                    slice::from_ref(meta),
+                )?;
                 self.top_mut().append_operation_with_result(op)
             }
             Quantifier { .. } => todo!("quantifier expression is not supported yet"),

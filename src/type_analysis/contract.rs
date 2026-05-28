@@ -42,7 +42,7 @@ where
         }
     }
 
-    /// Configuration for type-checking inside a contract block.
+    /// Configuration for type-checking blocks inside a contract.
     fn block_cfg() -> BlockTypeCheckerCfg {
         BlockTypeCheckerCfg {
             allows_invariants: true,
@@ -63,12 +63,16 @@ where
 
     /// Pushes a new scope and binds the implicit environment derived from the object associated to
     /// the contract.
+    ///
+    /// Returns the input types of the contract's function type.
     fn push_and_bind(
         &mut self,
         decl: &ContractDecl<'ast>,
         info: impl StructInfo<'c, TypeSystem = T>,
         diags: &mut Diagnostics,
-    ) {
+    ) -> Vec<T::Type> {
+        let mut inputs = Vec::from_iter(info.self_type());
+
         self.ctx.scope().push_local_limit(());
 
         // Fill the scope with template parameters (as normal locals?)
@@ -85,6 +89,7 @@ where
 
         // Fill the scope with input arguments as parameters (with the param number)
         for (n, t) in info.inputs().enumerate() {
+            inputs.push(t.clone());
             let name = self.ident(&format!("${n}"), decl);
             diags.extract_type_result(self.ctx.scope().top().bind_parameter(&name, t, n), || {
                 format!("while binding input #{n}")
@@ -108,6 +113,8 @@ where
                 format!("while binding loop '{}'", name.value())
             });
         }
+
+        inputs
     }
 }
 
@@ -126,13 +133,13 @@ where
             format!("in contract declaration: {err}")
         })?;
 
-        self.push_and_bind(decl, struct_info, &mut diags);
+        let inputs = self.push_and_bind(decl, struct_info, &mut diags);
         let mut block_tc = BlockTypeChecker::new(self.source_name, self.ctx, Self::block_cfg());
         let body = diags.extract_result(decl.body().accept(&mut block_tc));
         self.ctx.scope().pop();
 
         diags.finish(|| {
-            let t = self.ctx.ts().func_type(&[], &[]);
+            let t = self.ctx.ts().func_type(&inputs, &[]);
             ContractDecl::new(
                 decl.target().with_meta(t.into()),
                 body.unwrap(),

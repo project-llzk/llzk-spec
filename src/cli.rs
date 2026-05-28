@@ -76,10 +76,7 @@ pub fn run(args: Args) -> Result<(), CompileError> {
     // Wrap emitting the MLIR IR of the spec in `--emit=ir` since the verification logic currently
     // uses the AST.
     if let Some(Emit::Ir) = args.emit {
-        let ir_ctx = match args.field {
-            Some(field) => Context::with_field(field),
-            None => Context::new(),
-        };
+        let ir_ctx = args.field.map(Context::with_field).unwrap_or_default();
         let circuit = ir_ctx.parse_module(&ir_name, &ir_source)?;
         let module = emit_on_empty_module(&ir_ctx, &ctx, &spec_name, &document, &circuit)?;
         if !module.as_operation().verify() {

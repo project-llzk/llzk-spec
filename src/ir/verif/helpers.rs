@@ -259,7 +259,7 @@ impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
 
 /// Visits an entity inside a fresh scope.
 ///
-/// The scope uses a block that is added to the given region and it popped before returning.
+/// The scope uses a block that is added to the given region and popped before returning.
 pub fn accept_in_new_scope<'ast, 'ctx, 'blk, V, R>(
     region: &Region<'ctx>,
     scope: &mut SpecCodegen<'ast, 'ctx, 'blk>,

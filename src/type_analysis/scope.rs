@@ -194,7 +194,7 @@ where
         let scope_count = self.scopes.len() + 1;
         self.ordered_scopes().enumerate().try_for_each(|(n, s)| {
             let n = scope_count - n;
-            writeln!(f, "Scope #{n}")?;
+            write!(f, "Scope #{n} ")?;
             std::fmt::Debug::fmt(s, f)
         })
     }
@@ -210,7 +210,7 @@ pub struct Scope<'ast, L, F, P> {
     params: HashMap<usize, Symbol<'ast>>,
     /// Maps names to loops defined on the circuit.
     ///
-    /// Accessors for this bindings table are only available if `P == ()`.
+    /// Accessors to this table are only available if `P == ()`.
     loops: HashMap<Symbol<'ast>, LoopInfo<L>>,
     /// Indicates wether this scope entry limits the access to the locals defined in outer scopes.
     local_limit: bool,
@@ -312,6 +312,7 @@ where
     F: std::fmt::Display,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "{{")?;
         if !self.predicates.is_empty() {
             writeln!(f, "  Predicates:")?;
             self.predicates.iter().try_for_each(|(symbol, binding)| {
@@ -330,8 +331,7 @@ where
                 writeln!(f, "    {}: {binding}", symbol.value())
             })?;
         }
-
-        Ok(())
+        writeln!(f, "}}")
     }
 }
 

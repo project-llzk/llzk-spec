@@ -99,18 +99,25 @@ impl Default for Context {
     }
 }
 
+/// Implementation of [`TypeSystem`] based on MLIR.
 pub struct MlirTypeSystem<'ctx> {
     ctx: &'ctx Context,
     next_var: usize,
 }
 
 impl<'ctx> MlirTypeSystem<'ctx> {
+    /// Creates a new type system.
     pub fn new(ctx: &'ctx Context) -> Self {
         Self { ctx, next_var: 0 }
     }
 }
 
 impl<'ctx> TypeSystem for MlirTypeSystem<'ctx> {
+    // We are currently using `Type` since that's the obvious thing to do. However, if in the
+    // future we want to do things like pretty printing the type in diagnostic messages (i.e.
+    // printing `Bool` instead of `i1`) we can replace it with a wrapper.
+    //
+    // We already have wrappers for other types for other reasons so it's not to far fetched.
     type Type = Type<'ctx>;
 
     type FnType = WrapFunctionType<'ctx>;
@@ -265,11 +272,16 @@ impl std::fmt::Debug for WrapFunctionType<'_> {
 /// equivalent.
 #[derive(Copy, Clone)]
 pub enum WrapStructLike<'ctx> {
+    // TODO: All the functionality of the necessary traits is not implemented for the `StructType` case
+    // since it may require looking up and we don't have direct support for that.
+    /// Wraps a [`StructType`].
     Struct(StructType<'ctx>),
+    /// Wraps a [`PodType`].
     Pod(PodType<'ctx>),
 }
 
 impl WrapStructLike<'_> {
+    /// Returns the raw MLIR CAPI represenation.
     fn to_raw(&self) -> mlir_sys::MlirType {
         match self {
             WrapStructLike::Struct(t) => t.to_raw(),

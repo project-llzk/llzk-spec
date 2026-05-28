@@ -36,6 +36,10 @@ impl<'ctx, 'ast, T: TypeSystem> InvariantTypeChecker<'ctx, 'ast, T> {
         }
     }
 
+    /// Pushes a new scope, binding into it the declared loop arguments.
+    ///
+    /// Fails if the loop is not found and, in that case, the new scope is not pushed. Only if the result is `Ok`
+    /// it is required to pop the stack.
     fn push_and_bind(
         &mut self,
         decl: &InvariantDecl<'ast>,

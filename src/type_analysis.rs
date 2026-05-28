@@ -1,4 +1,9 @@
 //! Type analysis of the AST.
+//!
+//! Type-checking is performed in a generic manner via the [`TypeSystem`] trait. Implementations of
+//! that trait define what types are used for representing the different types in the language and
+//! how they are constructed. This way, the type-checker only needs to focus on the semantic rules
+//! of the language.
 
 use std::marker::PhantomData;
 
@@ -23,8 +28,10 @@ pub mod loops;
 mod predicate;
 pub mod scope;
 
+/// Shorthand for a typing result, whose error type is a collection of diagnostics.
 type TypingResult<T> = Result<T, Vec<Diagnostic>>;
 
+/// Top-level type checker.
 pub struct TypeChecker<'ast, 'info, 'c, T, C>
 where
     T: TypeSystem,
@@ -51,7 +58,16 @@ where
         }
     }
 
-    /// Typechecks the document using the provided type system.
+    // We copy the AST at this point since it's currently reused in other parts of the tool. If we
+    // remove those parts and only rely on either the returned AST or the MLIR IR we can replace
+    // the logic to moving the AST. It will still effectively copy the whole tree since is adding
+    // the types but we won't have two copies of the AST in memory at the same time.
+    // We'll have to add a visitor that moves the visited entity (i.e. `VisitableOnce` and
+    // `VisitorOnce` similar to `Fn` and `FnOnce`)
+    /// Typechecks the document using the provided type system and circuit information provider.
+    ///
+    /// Returns a copy of the AST with associated metadata that represents the types deduced for
+    /// the particular entity.
     pub fn check(
         ts: T,
         info: &'info C,
@@ -307,6 +323,9 @@ pub trait StructInfo<'info> {
         &self,
         ts: &mut Self::TypeSystem,
     ) -> Vec<LoopInfo<<Self::TypeSystem as TypeSystem>::Type>>;
+
+    /// Returns the type of the struct.
+    fn self_type(&self) -> Option<<Self::TypeSystem as TypeSystem>::Type>;
 }
 
 /// Information about a struct's member.

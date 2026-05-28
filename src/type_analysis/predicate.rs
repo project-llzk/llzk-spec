@@ -48,7 +48,7 @@ impl<'ctx, 'ast, T: TypeSystem> PredicateTypeChecker<'ctx, 'ast, T> {
     ///
     /// The type check is performed via a type constraint so this method should be called before
     /// [`Self::ensure_full_param_monomorphization`] to allow propagating types. Otherwise
-    /// predicates like `predicate foo(x) = x` will fails to type check.
+    /// predicates like `predicate foo(x) = x` will fail to type check.
     fn ensure_return_terminator(&mut self, block: &Block<'_, T::Type>, diags: &mut Diagnostics) {
         let Some(last) = block.statements().last() else {
             diags.add("predicates cannot have an empty body");
@@ -65,7 +65,7 @@ impl<'ctx, 'ast, T: TypeSystem> PredicateTypeChecker<'ctx, 'ast, T> {
         }
     }
 
-    /// Generate N fresh type variables
+    /// Generates N fresh type variables.
     fn fresh_vars(&mut self, n: usize) -> Vec<T::Type> {
         std::iter::repeat_with(|| self.ctx.ts().fresh_var())
             .take(n)
@@ -183,6 +183,7 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<PredicateDecl<'ast>>
     }
 }
 
+/// Creates a typed predicate declaration AST entity.
 fn create_decl<'ast, T>(
     decl: &PredicateDecl<'ast>,
     ins: Vec<T>,

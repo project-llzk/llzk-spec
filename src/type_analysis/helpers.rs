@@ -117,6 +117,7 @@ pub struct Diagnostics<'s> {
 }
 
 impl<'s> Diagnostics<'s> {
+    /// Creates an empty type-checking diagnostics set.
     pub fn new(source_name: &'s str, spanned: &'s dyn Spanned) -> Self {
         Self {
             diags: Default::default(),
@@ -164,6 +165,31 @@ impl Diagnostics<'_> {
         })
     }
 
+    /// Converts the given result into a typing result if the diagnostics set is clean.
+    ///
+    /// If diagnostics have been accumulated already then the result is skipped.
+    pub fn to_typing_result_if_clean<R, C>(
+        mut self,
+        r: impl FnOnce() -> Result<R, TypeAnalysisError>,
+        context: impl FnOnce() -> C,
+    ) -> TypingResult<R>
+    where
+        C: std::fmt::Display,
+    {
+        if !self.diags.is_empty() {
+            return Err(self.diags);
+        }
+        r().map_err(|err| {
+            //let mut new = Self {
+            //    diags: self.diags.clone(),
+            //    source_name: self.source_name,
+            //    spanned: self.spanned,
+            //};
+            self.add_type_err(err, context());
+            self.into()
+        })
+    }
+
     /// Adds a new on-the-fly diagnostic.
     pub fn add(&mut self, message: impl std::fmt::Display) {
         self.add_at_location(message, self.spanned)
@@ -179,10 +205,25 @@ impl Diagnostics<'_> {
     }
 
     /// Adds a new on-the-fly diagnostic if the given condition is false.
-    pub fn add_unless<M: std::fmt::Display>(&mut self, check: bool, message: impl FnOnce() -> M) {
+    ///
+    /// Returns the value of the check s.t. it can be reused on `if` statements.
+    ///
+    /// For example:
+    ///
+    /// ```ignore
+    /// if diags.add_unless(cond, || "an error message") {
+    ///     // Do the thing that requires `cond` to be true.
+    /// }
+    /// ```
+    pub fn add_unless<M: std::fmt::Display>(
+        &mut self,
+        check: bool,
+        message: impl FnOnce() -> M,
+    ) -> bool {
         if !check {
             self.add(message())
         }
+        check
     }
 
     /// Extracts the typing result, accumulating the diagnostics if the result was a failure.

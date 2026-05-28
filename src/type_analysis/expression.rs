@@ -8,6 +8,7 @@ use crate::{
     },
 };
 
+/// Configuration for the expressions type-checker.
 pub(super) struct ExpressionTypeCheckerCfg {
     /// Whether the `old` expression is allowed.
     pub allows_old: bool,
@@ -16,6 +17,7 @@ pub(super) struct ExpressionTypeCheckerCfg {
 }
 
 impl ExpressionTypeCheckerCfg {
+    /// Creates a new configuration with default values.
     fn new(allows_arg: bool) -> Self {
         Self {
             allows_old: false,
@@ -255,13 +257,13 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Expression<'ast>> for ExpressionTypeChec
                 })
             }
 
-            //       s: Felt, e: Bool
-            // -------------------------------
-            //   forall s in N..M, e  : Bool
+            //  s: Felt, N: Felt, M: Felt, e: Bool
+            // ------------------------------------
+            //      forall s in N..M, e  : Bool
             //
-            //       s: Felt, e: Bool
-            // -------------------------------
-            //   exists s in N..M, e  : Bool
+            //  s: Felt, N: Felt, M: Felt, e: Bool
+            // ------------------------------------
+            //      exists s in N..M, e  : Bool
             //
             //  e_0 : Array of t, s : t, e_1: Bool
             // ------------------------------------
@@ -366,11 +368,14 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Expression<'ast>> for ExpressionTypeChec
             Expression::Old {
                 expression, span, ..
             } => {
-                diags.add_unless(
+                let expression = if diags.add_unless(
                     self.cfg.allows_old,
                     || "old expression is not allowed in this context",
-                );
-                let expression = diags.extract_result(expression.accept(self));
+                ) {
+                    diags.extract_result(expression.accept(self))
+                } else {
+                    None
+                };
                 diags.finish(|| {
                     let expression = expression.unwrap();
                     let meta = expression.r#type();
@@ -391,9 +396,10 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Expression<'ast>> for ExpressionTypeChec
                     || "arg expression is not allowed in this context",
                 );
                 diags
-                    .to_typing_result(self.ctx.scope().find_parameter(index).cloned(), || {
-                        format!("on argument #{index}")
-                    })
+                    .to_typing_result_if_clean(
+                        || self.ctx.scope().find_parameter(index).cloned(),
+                        || format!("on argument #{index}"),
+                    )
                     .map(|t| Expression::Arg {
                         index: *index,
                         span: *span,

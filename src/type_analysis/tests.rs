@@ -4,6 +4,7 @@ use std::collections::HashMap;
 
 use super::*;
 
+/// Mock type system intended for testing.
 #[derive(Default)]
 pub struct MockTypeSystem {
     next_var: usize,
@@ -38,8 +39,10 @@ impl TypeSystem for MockTypeSystem {
     type StructType = MockStructType;
 }
 
+/// Identifier for type variables.
 pub type TypeVarId = usize;
 
+/// Mock type intended for testing.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MockType {
     Felt,
@@ -68,17 +71,20 @@ impl From<MockStructType> for MockType {
     }
 }
 
+/// Mock function type intended for testing.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MockFnType {
     ins: Vec<MockType>,
     outs: Vec<MockType>,
 }
 
+/// Mock array type intended for testing.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MockArrayType {
     inner: Box<MockType>,
 }
 
+/// Mock struct type intended for testing.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MockStructType {
     members: HashMap<String, MockType>,

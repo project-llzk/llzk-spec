@@ -1,10 +1,12 @@
+//! Type-checking errors.
+
 use crate::{
     ast::Span,
     diagnostic::{CompileError, Diagnostic},
 };
 use thiserror::Error;
 
-/// Top-level compilation error categories.
+/// Errors related to type-checking.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum TypeAnalysisError {
     #[error("duplicate predicate '{0}'")]

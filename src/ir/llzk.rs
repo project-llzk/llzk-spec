@@ -172,7 +172,9 @@ impl<'ctx> StructInfo<'ctx> for LlzkStructInfo<'ctx, '_> {
                     info.push(LoopInfo::new_for_loop(
                         label,
                         ts,
-                        // For loops have 3 base operands (lb, up, stride) and then it's extra arguments.
+                        // `scf.for` loops have 3 base operands (lb, up, stride) and then is extra arguments.
+                        // The types for those 3 operands + the inductive variable are handled
+                        // by the constructor.
                         op.operands()
                             .skip(3)
                             .map(|v| unsafe { Type::from_raw(v.r#type().to_raw()) }),
@@ -190,6 +192,13 @@ impl<'ctx> StructInfo<'ctx> for LlzkStructInfo<'ctx, '_> {
             WalkResult::Advance
         });
         info
+    }
+
+    fn self_type(&self) -> Option<Type<'ctx>> {
+        match self {
+            LlzkStructInfo::Struct(op) => Some(op.r#type().into()),
+            LlzkStructInfo::Function(_) => None,
+        }
     }
 }
 

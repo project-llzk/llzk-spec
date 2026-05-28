@@ -18,12 +18,14 @@ pub enum ScopeTag {
 }
 
 impl ScopeTag {
-    /// Returns wether the tagged scope can append `function.def` operations.
+    /// Returns whether the tagged scope can append `function.def` operations.
     pub fn accepts_function_def_ops(self) -> bool {
         matches!(self, ScopeTag::Root)
     }
 }
 
+/// Additional payload appended to each scope with information specific to emitting MLIR
+/// operations.
 pub(super) struct ScopeData<'ctx, 'blk> {
     /// Current insertion block.
     block: BlockRef<'ctx, 'blk>,
@@ -56,57 +58,17 @@ impl<'ctx, 'blk> ScopeData<'ctx, 'blk> {
     }
 }
 
+/// Stack of scopes predefined with the types used for emitting IR.
 pub type CodegenScopeStack<'ast, 'ctx, 'blk> =
     ScopeStack<'ast, Value<'ctx, 'blk>, FuncDefOpRef<'ctx, 'blk>, ScopeData<'ctx, 'blk>>;
+/// Scope predefined with the types used for emitting IR.
+///
+/// Has some extra methods that make sense to have in this kind of scope but not on the generic
+/// scope type.
 pub type CodegenScope<'ast, 'ctx, 'blk> =
     Scope<'ast, Value<'ctx, 'blk>, FuncDefOpRef<'ctx, 'blk>, ScopeData<'ctx, 'blk>>;
 
-///// Entry in the scope stack.
-//pub(super) struct Scope<'ast, 'ctx, 'blk> {
-//    /// Binds names to predicates.
-//    predicates: HashMap<Symbol<'ast>, FuncDefOpRef<'ctx, 'blk>>,
-//    /// Binds local names to SSA values.
-//    locals: HashMap<Symbol<'ast>, Value<'ctx, 'blk>>,
-//}
-
 impl<'ast, 'ctx, 'blk> CodegenScope<'ast, 'ctx, 'blk> {
-    ///// Binds a reference to a `function.def` operation to the given symbol.
-    /////
-    ///// The reference must have been inserted somewhere with a lifetime greater or equal to the
-    ///// block's lifetime. It could be the block pointed by this scope or a parent block.
-    //pub fn bind_predicate(
-    //    &mut self,
-    //    name: &TypedIdentifier<'ast, 'ctx>,
-    //    func_op: FuncDefOpRef<'ctx, 'blk>,
-    //) -> Result<(), CompileError> {
-    //    if self.predicates.contains_key(&name.symbol()) {
-    //        return Err(CompileError::Ir(format!(
-    //            "duplicate predicate '{}'",
-    //            name.value()
-    //        )));
-    //    }
-    //    self.predicates.insert(name.symbol(), func_op);
-    //    Ok(())
-    //}
-
-    ///// Binds a SSA value to the given symbol.
-    /////
-    ///// The SSA value must dominate any future users that point to the symbol.
-    //pub fn bind_local(
-    //    &mut self,
-    //    name: &TypedIdentifier<'ast, 'ctx>,
-    //    value: Value<'ctx, 'blk>,
-    //) -> Result<(), CompileError> {
-    //    if self.locals.contains_key(&name.symbol()) {
-    //        return Err(CompileError::Ir(format!(
-    //            "duplicate local '{}'",
-    //            name.value()
-    //        )));
-    //    }
-    //    self.locals.insert(name.symbol(), value);
-    //    Ok(())
-    //}
-
     /// Appends the operation into the block.
     pub fn append_operation(&mut self, op: impl Into<Operation<'ctx>>) -> OperationRef<'ctx, 'blk> {
         self.payload().block.append_operation(op.into())
@@ -148,16 +110,6 @@ impl<'ast, 'ctx, 'blk> CodegenScope<'ast, 'ctx, 'blk> {
         }
         Ok(op_ref.result(0)?.into())
     }
-
-    ///// Returns a reference to the predicates namespace.
-    //pub fn predicates(&self) -> &HashMap<Symbol<'ast>, FuncDefOpRef<'ctx, 'blk>> {
-    //    &self.predicates
-    //}
-    //
-    ///// Returns a reference to the locals namespace.
-    //pub fn locals(&self) -> &HashMap<Symbol<'ast>, Value<'ctx, 'blk>> {
-    //    &self.locals
-    //}
 
     /// Returns the tag of the scope, if available.
     pub fn tag(&self) -> Option<ScopeTag> {

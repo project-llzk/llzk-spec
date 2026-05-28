@@ -275,6 +275,7 @@ impl<'ast, T: TypeSystem> TypeInferenceCtx<'ast, T> {
         self.ast.symbol(value)
     }
 
+    /// Returns a reference to the AST context.
     pub(super) fn ast(&self) -> &'ast AstContext {
         self.ast
     }

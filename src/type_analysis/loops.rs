@@ -19,8 +19,8 @@ impl<T> LoopInfo<T> {
     ///
     /// `args` must be any additional arguments that are passed to the loop.
     ///
-    /// Requires a mutable reference to a type system for creating the types of the intrinsic
-    /// bindings of the loop.
+    /// Requires a mutable reference to a type system for creating the types of the
+    /// bindings intrinsic to the loop.
     pub fn new_for_loop<TS>(
         label: LoopLabel,
         ts: &mut TS,
@@ -80,6 +80,9 @@ enum LoopLabelImpl {
 ///
 /// Can be an explicit label or it can be implicitly derived from the loop's position in the
 /// circuit.
+///
+/// The naming convention for loop labels is handled by this type and clients should not attempt to
+/// give names to loops that are not explicitly labeled.
 #[derive(Clone)]
 pub struct LoopLabel {
     inner: LoopLabelImpl,
