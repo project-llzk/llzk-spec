@@ -180,11 +180,6 @@ impl Diagnostics<'_> {
             return Err(self.diags);
         }
         r().map_err(|err| {
-            //let mut new = Self {
-            //    diags: self.diags.clone(),
-            //    source_name: self.source_name,
-            //    spanned: self.spanned,
-            //};
             self.add_type_err(err, context());
             self.into()
         })
@@ -239,7 +234,7 @@ impl Diagnostics<'_> {
         }
     }
 
-    /// Creates a typinh result from another result, accumulating the diagnostics if the result was a failure.
+    /// Creates a typing result from another result, accumulating the diagnostics if the result was a failure.
     pub fn from_other_result<T, E, M: std::fmt::Display>(
         &mut self,
         r: Result<T, E>,

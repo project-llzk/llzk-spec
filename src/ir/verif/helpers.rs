@@ -37,7 +37,7 @@ impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
         let func_op = self.create_func_def_op(decl.span(), decl.name())?;
         let func_op = self.bind_predicate(decl.name(), func_op)?;
 
-        let block = func_op.region(0)?.append_block(Block::new(&block_args));
+        let block = func_op.get_body()?.append_block(Block::new(&block_args));
 
         self.push_tagged(block, ScopeTag::Predicate);
 
@@ -193,7 +193,7 @@ impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
         )
     }
 
-    /// Looks for a `function.def` operation binded to the given predicate symbol.
+    /// Looks for a `function.def` operation bound to the given predicate symbol.
     pub fn find_predicate(
         &self,
         name: &TypedIdentifier<'ast, 'ctx>,
@@ -228,7 +228,7 @@ impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
         })
     }
 
-    /// Looks for the actual name of the predicate binded by the given symbol.
+    /// Looks for the actual name of the predicate bound by the given symbol.
     ///
     /// If two predicates on different scopes have the same name they may get inserted on the same
     /// block, requiring that one of them changes its name to ensure uniqueness. When emitting

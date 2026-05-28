@@ -76,7 +76,7 @@ where
 
         self.ctx.scope().push_local_limit(());
 
-        // Fill the scope with template parameters (as normal locals?)
+        // Fill the scope with template parameters
         for info in info.template_params().filter(|info| info.r#type.is_some()) {
             let name = self.ident(info.name, decl);
             diags.extract_type_result(

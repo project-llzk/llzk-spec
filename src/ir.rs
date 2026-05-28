@@ -117,7 +117,7 @@ impl<'ctx> TypeSystem for MlirTypeSystem<'ctx> {
     // future we want to do things like pretty printing the type in diagnostic messages (i.e.
     // printing `Bool` instead of `i1`) we can replace it with a wrapper.
     //
-    // We already have wrappers for other types for other reasons so it's not to far fetched.
+    // We already have wrappers for other types for other reasons so it's not too far fetched.
     type Type = Type<'ctx>;
 
     type FnType = WrapFunctionType<'ctx>;
@@ -282,7 +282,7 @@ pub enum WrapStructLike<'ctx> {
 }
 
 impl WrapStructLike<'_> {
-    /// Returns the raw MLIR CAPI represenation.
+    /// Returns the raw MLIR CAPI representation.
     fn to_raw(&self) -> mlir_sys::MlirType {
         match self {
             WrapStructLike::Struct(t) => t.to_raw(),
