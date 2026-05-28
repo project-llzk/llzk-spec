@@ -186,11 +186,11 @@ impl<'ctx> TypeProperties for Type<'ctx> {
         types_unify(*self, *other)
     }
 
-    fn is_struct_type(&self) -> bool {
+    fn is_struct_like_type(&self) -> bool {
         is_struct_type(*self) || is_pod_type(*self)
     }
 
-    fn to_struct_type(&self) -> Option<Self::StructType> {
+    fn to_struct_like_type(&self) -> Option<Self::StructType> {
         if let Ok(t) = StructType::try_from(*self) {
             Some(WrapStructLike::Struct(t))
         } else if let Ok(t) = PodType::try_from(*self) {
@@ -343,7 +343,7 @@ impl<'ctx> StructTypeProperties for WrapStructLike<'ctx> {
         }
     }
 
-    fn members(&self) -> Vec<Type<'ctx>> {
+    fn member_types(&self) -> Vec<Type<'ctx>> {
         match self {
             WrapStructLike::Struct(_) => todo!(),
             WrapStructLike::Pod(t) => t.get_records().into_iter().map(|r| r.r#type()).collect(),

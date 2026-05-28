@@ -36,32 +36,32 @@ impl<'ctx, 'ast, T: TypeSystem> BaseTypeChecker<'ctx, 'ast, T> {
     }
 
     /// Helper for constraining a potential expression to a Felt type.
-    pub fn constraint_to_felt(&mut self, expr: Option<&Expression<'ast, T::Type>>) {
+    pub fn constrain_to_felt(&mut self, expr: Option<&Expression<'ast, T::Type>>) {
         let felt_type = self.ctx.ts().felt_type();
-        self.constraint_to(expr, felt_type);
+        self.constrain_to(expr, felt_type);
     }
 
     /// Helper for constraining a potential expression to a Bool type.
-    pub fn constraint_to_bool(&mut self, expr: Option<&Expression<'ast, T::Type>>) {
+    pub fn constrain_to_bool(&mut self, expr: Option<&Expression<'ast, T::Type>>) {
         let bool_type = self.ctx.ts().bool_type();
-        self.constraint_to(expr, bool_type);
+        self.constrain_to(expr, bool_type);
     }
 
     /// Helper for constraining a potential expression to a type.
-    pub fn constraint_to(&mut self, expr: Option<&Expression<'ast, T::Type>>, expected: T::Type) {
+    pub fn constrain_to(&mut self, expr: Option<&Expression<'ast, T::Type>>, expected: T::Type) {
         if let Some(e) = expr {
             self.ctx.add_constraint(expected, e.r#type());
         }
     }
 
     /// Helper for constraining two potential expressions to have the same type.
-    pub fn constraint_equal(
+    pub fn constrain_equal(
         &mut self,
         lhs: Option<&Expression<'ast, T::Type>>,
         rhs: Option<&Expression<'ast, T::Type>>,
     ) {
         if let Some(lhs) = lhs {
-            self.constraint_to(rhs, lhs.r#type())
+            self.constrain_to(rhs, lhs.r#type())
         }
     }
 }

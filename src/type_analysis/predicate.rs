@@ -26,7 +26,7 @@ impl<'ctx, 'ast, T: TypeSystem> PredicateTypeChecker<'ctx, 'ast, T> {
 
     /// Ensures that, with the exception of the last statement, the body of the predicate does not
     /// contain `return` statements.
-    fn ensure_no_early_return(&self, block: &Block<'_, T::Type>, diags: &mut Diagnostics) {
+    fn ensure_no_early_return(&self, block: &Block<'ast, T::Type>, diags: &mut Diagnostics) {
         block
             .statements()
             .iter()
@@ -49,7 +49,7 @@ impl<'ctx, 'ast, T: TypeSystem> PredicateTypeChecker<'ctx, 'ast, T> {
     /// The type check is performed via a type constraint so this method should be called before
     /// [`Self::ensure_full_param_monomorphization`] to allow propagating types. Otherwise
     /// predicates like `predicate foo(x) = x` will fail to type check.
-    fn ensure_return_terminator(&mut self, block: &Block<'_, T::Type>, diags: &mut Diagnostics) {
+    fn ensure_return_terminator(&mut self, block: &Block<'ast, T::Type>, diags: &mut Diagnostics) {
         let Some(last) = block.statements().last() else {
             diags.add("predicates cannot have an empty body");
             return;
@@ -117,7 +117,7 @@ impl<'ctx, 'ast, T: TypeSystem> PredicateTypeChecker<'ctx, 'ast, T> {
         diags: &mut Diagnostics,
     ) {
         for name in decl.params() {
-            // The param MUST exist. If it doesn't is a bug in our part because we are probably
+            // The param MUST exist. If it doesn't, it is a bug in our part because we are probably
             // calling this method wrong.
             diags.add_unless(
                 !self.ctx.scope().find_local(name).unwrap().is_var_type(),

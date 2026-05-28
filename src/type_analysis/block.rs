@@ -120,7 +120,7 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Statement<'ast>> for BlockTypeChecker<'c
                     let mut expr_tc =
                         ExpressionTypeChecker::new(self.source_name, self.ctx, allows_arg);
                     let expression = diags.extract_result(expression.accept(&mut expr_tc));
-                    self.constraint_to_bool(expression.as_ref());
+                    self.constrain_to_bool(expression.as_ref());
                     self.unify(span, || "on require statement", &mut diags);
                     expression
                 } else {
@@ -142,7 +142,7 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Statement<'ast>> for BlockTypeChecker<'c
                     let mut expr_tc =
                         ExpressionTypeChecker::new(self.source_name, self.ctx, allows_arg);
                     let expression = diags.extract_result(expression.accept(&mut expr_tc));
-                    self.constraint_to_bool(expression.as_ref());
+                    self.constrain_to_bool(expression.as_ref());
                     self.unify(span, || "on ensure statement", &mut diags);
                     expression
                 } else {
@@ -210,7 +210,7 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Statement<'ast>> for BlockTypeChecker<'c
                     let mut expr_tc =
                         ExpressionTypeChecker::new(self.source_name, self.ctx, allows_arg);
                     expr = diags.extract_result(expression.accept(&mut expr_tc));
-                    self.constraint_to_felt(expr.as_ref());
+                    self.constrain_to_felt(expr.as_ref());
                     self.unify(span, || "on increases statement", &mut diags);
                 }
                 diags.finish(|| Statement::Increases {
@@ -230,7 +230,7 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Statement<'ast>> for BlockTypeChecker<'c
                     let mut expr_tc =
                         ExpressionTypeChecker::new(self.source_name, self.ctx, allows_arg);
                     expr = diags.extract_result(expression.accept(&mut expr_tc));
-                    self.constraint_to_felt(expr.as_ref());
+                    self.constrain_to_felt(expr.as_ref());
                     self.unify(span, || "on decreases statement", &mut diags);
                 }
                 diags.finish(|| Statement::Decreases {
@@ -256,7 +256,7 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Statement<'ast>> for BlockTypeChecker<'c
                         },
                     );
                     expr = diags.extract_result(expression.accept(&mut expr_tc));
-                    self.constraint_to_bool(expr.as_ref());
+                    self.constrain_to_bool(expr.as_ref());
                     self.unify(span, || "on step statement", &mut diags);
                 }
                 diags.finish(|| Statement::Step {

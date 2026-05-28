@@ -6,7 +6,7 @@ use llzk::{
     dialect::{function, poly::unifiable_cast},
     prelude::{
         FlatSymbolRefAttribute, FuncDefOp, FuncDefOpLike as _, FuncDefOpRef, FunctionType,
-        OperationLike as _, StringAttribute, melior_dialects::scf,
+        LlzkContext, OperationLike as _, StringAttribute, melior_dialects::scf,
     },
 };
 use melior::ir::{
@@ -97,8 +97,8 @@ impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
         &self.builder
     }
 
-    /// Returns a reference to the MLIR context.
-    pub fn context(&self) -> &'ctx melior::Context {
+    /// Returns a reference to the LLZK context.
+    pub fn context(&self) -> &'ctx LlzkContext {
         &self.ctx.context
     }
 
@@ -182,7 +182,7 @@ impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
             .ok_or_else(on_error)
     }
 
-    /// Looks for a SSA value binded to the given local symbol.
+    /// Looks for a SSA value bound to the given local symbol.
     pub fn find_symbol(
         &self,
         name: &TypedIdentifier<'ast, 'ctx>,

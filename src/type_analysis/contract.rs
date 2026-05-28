@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     marker::PhantomData,
     ops::{Deref, DerefMut},
 };
@@ -6,7 +7,7 @@ use std::{
 use crate::{
     ast::{ContractDecl, Identifier, Spanned, Visitable, Visitor},
     type_analysis::{
-        CircuitInfo, StructInfo, TypeInferenceCtx, TypeSystem, TypingResult,
+        CircuitInfo, ContractTargetInfo, TypeInferenceCtx, TypeSystem, TypingResult,
         base::BaseTypeChecker,
         block::{BlockTypeChecker, BlockTypeCheckerCfg},
         helpers::Diagnostics,
@@ -68,7 +69,7 @@ where
     fn push_and_bind(
         &mut self,
         decl: &ContractDecl<'ast>,
-        info: impl StructInfo<'c, TypeSystem = T>,
+        info: impl ContractTargetInfo<'c, TypeSystem = T>,
         diags: &mut Diagnostics,
     ) -> Vec<T::Type> {
         let mut inputs = Vec::from_iter(info.self_type());
@@ -89,11 +90,30 @@ where
 
         // Fill the scope with input arguments as parameters (with the param number)
         for (n, t) in info.inputs().enumerate() {
-            inputs.push(t.clone());
-            let name = self.ident(&format!("${n}"), decl);
-            diags.extract_type_result(self.ctx.scope().top().bind_parameter(&name, t, n), || {
-                format!("while binding input #{n}")
-            });
+            inputs.push(t.r#type.clone());
+            let name = t
+                .name
+                .map(Cow::Borrowed)
+                .unwrap_or_else(|| Cow::Owned(format!("$arg[{n}]")));
+            let name = self.ident(&name, decl);
+            diags.extract_type_result(
+                self.ctx.scope().top().bind_parameter(&name, t.r#type, n),
+                || format!("while binding input #{n}"),
+            );
+        }
+        // Fill the scope with outputs in declaration order. These must be done after the inputs s.t. they
+        // are in the correct order in the `inputs` vector.
+        for (n, t) in info.outputs().enumerate() {
+            inputs.push(t.r#type.clone());
+            let name = t
+                .name
+                .map(Cow::Borrowed)
+                .unwrap_or_else(|| Cow::Owned(format!("$res[{n}]")));
+            let name = self.ident(&name, decl);
+            diags.extract_type_result(
+                self.ctx.scope().top().bind_output(&name, t.r#type, n),
+                || format!("while binding output #{n}"),
+            );
         }
         // Fill the scope with the struct members.
         for member in info.members() {
@@ -129,11 +149,12 @@ where
     fn visit(&mut self, decl: &ContractDecl<'ast>) -> Self::Output {
         let mut diags = Diagnostics::new(self.source_name, decl);
 
-        let struct_info = diags.from_other_result(self.info.find_struct(decl.target()), |err| {
-            format!("in contract declaration: {err}")
-        })?;
+        let target_info = diags
+            .from_other_result(self.info.find_contract_target(decl.target()), |err| {
+                format!("in contract declaration: {err}")
+            })?;
 
-        let inputs = self.push_and_bind(decl, struct_info, &mut diags);
+        let inputs = self.push_and_bind(decl, target_info, &mut diags);
         let mut block_tc = BlockTypeChecker::new(self.source_name, self.ctx, Self::block_cfg());
         let body = diags.extract_result(decl.body().accept(&mut block_tc));
         self.ctx.scope().pop();

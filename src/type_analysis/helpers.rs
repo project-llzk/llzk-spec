@@ -20,7 +20,7 @@ impl<'ast, T: Clone + PartialEq> Expression<'ast, T> {
 
 impl BinaryOp {
     /// Returns the expected type of the operands of this binary op.
-    pub fn expected_type<T: TypeSystem>(&self, t: &mut T) -> T::Type {
+    pub fn operand_type<T: TypeSystem>(&self, t: &mut T) -> T::Type {
         match self {
             BinaryOp::Or | BinaryOp::And => t.bool_type(),
             BinaryOp::Eq
@@ -63,7 +63,7 @@ impl BinaryOp {
 
 impl UnaryOp {
     /// Returns the expected type of the operands of this unary op.
-    pub fn expected_type<T: TypeSystem>(&self, t: &mut T) -> T::Type {
+    pub fn operand_type<T: TypeSystem>(&self, t: &mut T) -> T::Type {
         match self {
             UnaryOp::Not => t.bool_type(),
             UnaryOp::Neg => t.felt_type(),

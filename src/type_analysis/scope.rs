@@ -11,6 +11,12 @@ use crate::{
 };
 
 /// Stack of lexical scopes used during type-checking.
+///
+/// This type is meant to be reusable in places that require keeping track of the lexical scoping
+/// rules of the language. For that purpose, what is actually bound to the names is parametrized by
+/// `L` and `F`. `L` is the type used for local names and `F` the type used for function-like
+/// entities like predicates. The parameter `P` represents an additional payload type that is appended to
+/// each scope that clients can use for augmenting them with data specific to their use case.
 pub struct ScopeStack<'ast, L, F, P = ()> {
     root: Scope<'ast, L, F, P>,
     scopes: Vec<Scope<'ast, L, F, P>>,
@@ -69,6 +75,17 @@ impl<'ast, L, F, P> ScopeStack<'ast, L, F, P> {
             .ok_or_else(|| TypeAnalysisError::UnknownLocal(format!("argument #{param_no}")))
     }
 
+    /// Looks for a local binding with the given output number.
+    pub fn find_output(&self, output_no: &usize) -> Result<&L, TypeAnalysisError> {
+        self.ordered_local_scopes()
+            // Fetch the closest binding
+            .find_map(|scope| {
+                let sym = scope.outputs.get(output_no)?;
+                scope.locals.get(&sym)
+            })
+            .ok_or_else(|| TypeAnalysisError::UnknownLocal(format!("output #{output_no}")))
+    }
+
     /// Looks for a predicate definition with the given identifier.
     pub fn find_predicate<M>(&self, name: &Identifier<'ast, M>) -> Result<&F, TypeAnalysisError> {
         self.ordered_scopes()
@@ -76,12 +93,12 @@ impl<'ast, L, F, P> ScopeStack<'ast, L, F, P> {
             .ok_or_else(|| TypeAnalysisError::UnknownPredicate(name.value().to_owned()))
     }
 
-    /// Returns an iterator of the scopes in stack order top to bottom.
+    /// Returns an iterator of the scopes in stack order top (most nested scope) to bottom (root scope).
     pub fn ordered_scopes(&self) -> impl Iterator<Item = &Scope<'ast, L, F, P>> {
         self.scopes.iter().rev().chain([&self.root])
     }
 
-    /// Returns an iterator of the scopes in stack order top to bottom until a local limit is
+    /// Returns an iterator of the scopes in stack order top (most nested scope) to bottom (root scope) until a local limit is
     /// reached.
     pub fn ordered_local_scopes(&self) -> impl Iterator<Item = &Scope<'ast, L, F, P>> {
         struct Iter<I> {
@@ -115,7 +132,7 @@ impl<'ast, L, F, P> ScopeStack<'ast, L, F, P> {
         }
     }
 
-    /// Returns an iterator of mutable references to the scopes in stack order top to bottom.
+    /// Returns an iterator of mutable references to the scopes in stack order top (most nested scope) to bottom (root scope).
     pub fn ordered_scopes_mut(&mut self) -> impl Iterator<Item = &mut Scope<'ast, L, F, P>> {
         self.scopes.iter_mut().rev().chain([&mut self.root])
     }
@@ -134,7 +151,7 @@ impl<'ast, L, F, P> ScopeStack<'ast, L, F, P> {
 }
 
 impl<'ast, L, F> ScopeStack<'ast, L, F, ()> {
-    /// Propagates resolved types across type variables binded in the scope.
+    /// Propagates resolved types across type variables bound in the scope.
     pub fn propagate<T>(&mut self, subst: &Subst<T>, ts: &mut T)
     where
         T: TypeSystem<Type = L, FnType = F>,
@@ -208,11 +225,13 @@ pub struct Scope<'ast, L, F, P> {
     locals: HashMap<Symbol<'ast>, L>,
     /// Maps argument numbers to local symbols at this scope level.
     params: HashMap<usize, Symbol<'ast>>,
+    /// Maps output numbers to local symbols at this scope level.
+    outputs: HashMap<usize, Symbol<'ast>>,
     /// Maps names to loops defined on the circuit.
     ///
     /// Accessors to this table are only available if `P == ()`.
     loops: HashMap<Symbol<'ast>, LoopInfo<L>>,
-    /// Indicates wether this scope entry limits the access to the locals defined in outer scopes.
+    /// Indicates whether this scope entry limits the access to the locals defined in outer scopes.
     local_limit: bool,
     /// Additional payload used by the scope.
     payload: P,
@@ -225,6 +244,7 @@ impl<'ast, L, F, P> Scope<'ast, L, F, P> {
             predicates: Default::default(),
             locals: Default::default(),
             params: Default::default(),
+            outputs: Default::default(),
             loops: Default::default(),
             local_limit,
             payload,
@@ -271,6 +291,21 @@ impl<'ast, L, F, P> Scope<'ast, L, F, P> {
         }
         self.locals.insert(name.symbol(), l.into());
         self.params.insert(param_no, name.symbol());
+        Ok(())
+    }
+
+    /// Binds the given value to an output name in the locals namespace.
+    pub fn bind_output<M>(
+        &mut self,
+        name: &Identifier<'ast, M>,
+        l: L,
+        output_no: usize,
+    ) -> Result<(), TypeAnalysisError> {
+        if self.locals.contains_key(&name.symbol()) || self.outputs.contains_key(&output_no) {
+            return Err(TypeAnalysisError::DuplicateLocal(name.value().to_owned()));
+        }
+        self.locals.insert(name.symbol(), l.into());
+        self.outputs.insert(output_no, name.symbol());
         Ok(())
     }
 

@@ -75,8 +75,8 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Expression<'ast>> for ExpressionTypeChec
                 let then_branch = diags.extract_result(then_branch.accept(self));
                 let else_branch = diags.extract_result(else_branch.accept(self));
 
-                self.constraint_to_bool(condition.as_ref());
-                self.constraint_equal(then_branch.as_ref(), else_branch.as_ref());
+                self.constrain_to_bool(condition.as_ref());
+                self.constrain_equal(then_branch.as_ref(), else_branch.as_ref());
                 self.unify(span, || "on conditional expression", &mut diags);
 
                 diags.finish(|| {
@@ -112,9 +112,9 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Expression<'ast>> for ExpressionTypeChec
             } => {
                 let left = diags.extract_result(left.accept(self));
                 let right = diags.extract_result(right.accept(self));
-                let expected = op.expected_type(self.ctx.ts());
-                self.constraint_to(left.as_ref(), expected.clone());
-                self.constraint_to(right.as_ref(), expected);
+                let expected = op.operand_type(self.ctx.ts());
+                self.constrain_to(left.as_ref(), expected.clone());
+                self.constrain_to(right.as_ref(), expected);
                 self.unify(span, || format!("in binary op '{op}'"), &mut diags);
 
                 diags.finish(|| Expression::Binary {
@@ -131,8 +131,8 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Expression<'ast>> for ExpressionTypeChec
             //  -e : Felt    !e : Bool
             Expression::Unary { op, expr, span, .. } => {
                 let expr = diags.extract_result(expr.accept(self));
-                let expected = op.expected_type(self.ctx.ts());
-                self.constraint_to(expr.as_ref(), expected);
+                let expected = op.operand_type(self.ctx.ts());
+                self.constrain_to(expr.as_ref(), expected);
                 self.unify(span, || format!("in unary op '{op}'"), &mut diags);
 
                 diags.finish(|| Expression::Unary {
@@ -156,7 +156,7 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Expression<'ast>> for ExpressionTypeChec
                 let index = diags.extract_result(index.accept(self));
 
                 let result_type = self.ctx.ts().fresh_var();
-                self.constraint_to_felt(index.as_ref());
+                self.constrain_to_felt(index.as_ref());
                 if let Some(target) = target.as_ref() {
                     self.ctx
                         .add_array_constraint(target.r#type(), result_type.clone());
@@ -233,7 +233,7 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Expression<'ast>> for ExpressionTypeChec
                 });
 
                 std::iter::zip(callee_inputs, &new_args).for_each(|(formal, arg)| {
-                    self.constraint_to(arg.as_ref(), formal);
+                    self.constrain_to(arg.as_ref(), formal);
                 });
                 let callee_outputs = callee_type.outputs();
                 diags.add_unless(callee_outputs.len() == 1, || format!("expected predicate '{}' to return a single boolean expression but returns {} expressions", callee.value(), callee_outputs.len()));
@@ -289,8 +289,8 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Expression<'ast>> for ExpressionTypeChec
                         // Constraint N and M to be felts.
                         let domain_start = diags.extract_result(start.accept(self));
                         let domain_end = diags.extract_result(end.accept(self));
-                        self.constraint_to_felt(domain_start.as_ref());
-                        self.constraint_to_felt(domain_end.as_ref());
+                        self.constrain_to_felt(domain_start.as_ref());
+                        self.constrain_to_felt(domain_end.as_ref());
                         (
                             // The type of the binding is always Felt in this case.
                             self.ctx.ts().felt_type(),
@@ -328,7 +328,7 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Expression<'ast>> for ExpressionTypeChec
                 let body = diags.extract_result(body.accept(self));
                 self.ctx.scope().pop();
 
-                self.constraint_to_bool(body.as_ref());
+                self.constrain_to_bool(body.as_ref());
                 self.unify(
                     span,
                     || format!("in {quantifier_kind} expression"),

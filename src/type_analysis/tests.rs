@@ -207,11 +207,11 @@ impl TypeProperties for MockType {
         self == other
     }
 
-    fn is_struct_type(&self) -> bool {
+    fn is_struct_like_type(&self) -> bool {
         matches!(self, Self::Struct(_))
     }
 
-    fn to_struct_type(&self) -> Option<Self::StructType> {
+    fn to_struct_like_type(&self) -> Option<Self::StructType> {
         match self {
             MockType::Struct(s) => Some(s.clone()),
             _ => None,
@@ -248,7 +248,7 @@ impl StructTypeProperties for MockStructType {
         self.members.get(name).cloned()
     }
 
-    fn members(&self) -> Vec<Self::Type> {
+    fn member_types(&self) -> Vec<Self::Type> {
         self.members.values().cloned().collect()
     }
 

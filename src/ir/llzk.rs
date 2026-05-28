@@ -8,7 +8,9 @@ use crate::ast::Identifier;
 use crate::diagnostic::CompileError;
 use crate::ir::MlirTypeSystem;
 use crate::type_analysis::loops::{LoopInfo, LoopLabel};
-use crate::type_analysis::{CircuitInfo, MemberInfo, ParamInfo, StructInfo};
+use crate::type_analysis::{
+    CircuitInfo, ContractTargetInfo, InputInfo, MemberInfo, OutputInfo, ParamInfo,
+};
 use llzk::dialect::{
     array::ArrayType,
     function::{FuncDefOpLike, is_func_def},
@@ -51,10 +53,10 @@ impl<'ctx> CircuitInfo<'ctx> for LlzkInfo<'ctx, '_> {
 
     type TypeSystem = MlirTypeSystem<'ctx>;
 
-    fn find_struct(
+    fn find_contract_target(
         &self,
         name: &Identifier,
-    ) -> Result<impl StructInfo<'ctx, TypeSystem = Self::TypeSystem>, Self::Error> {
+    ) -> Result<impl ContractTargetInfo<'ctx, TypeSystem = Self::TypeSystem>, Self::Error> {
         let mut result = None;
         self.module
             .as_operation()
@@ -63,7 +65,7 @@ impl<'ctx> CircuitInfo<'ctx> for LlzkInfo<'ctx, '_> {
                     let fqn =
                         struct_contract_target_name(&struct_op, StructDefOpLike::name(&struct_op));
                     if fqn == name.value() {
-                        result = Some(LlzkStructInfo::Struct(struct_op));
+                        result = Some(LlzkContractTarget::Struct(struct_op));
                         return WalkResult::Interrupt;
                     } else {
                         // Don't walk inside the operation since there isn't anything interesting to
@@ -75,7 +77,7 @@ impl<'ctx> CircuitInfo<'ctx> for LlzkInfo<'ctx, '_> {
                 if let Some(func_op) = FuncDefOpRef::from_option_raw(operation.to_raw()) {
                     let fqn = StringAttribute::try_from(func_op.fully_qualified_name()).unwrap();
                     if fqn.value() == name.value() {
-                        result = Some(LlzkStructInfo::Function(func_op));
+                        result = Some(LlzkContractTarget::Function(func_op));
                         return WalkResult::Interrupt;
                     } else {
                         // Don't walk inside the operation since there isn't anything interesting to
@@ -87,23 +89,23 @@ impl<'ctx> CircuitInfo<'ctx> for LlzkInfo<'ctx, '_> {
                 WalkResult::Advance
             });
 
-        result.ok_or_else(|| error::Error::StructNotFound(name.value().to_owned()))
+        result.ok_or_else(|| error::Error::ContractTargetNotFound(name.value().to_owned()))
     }
 }
 
-/// Implementation of [`StructInfo`] for LLZK structs and functions.
-enum LlzkStructInfo<'ctx, 'op> {
+/// Implementation of [`ContractTargetInfo`] for LLZK structs and functions.
+enum LlzkContractTarget<'ctx, 'op> {
     Struct(StructDefOpRef<'ctx, 'op>),
     Function(FuncDefOpRef<'ctx, 'op>),
 }
 
-impl<'ctx> StructInfo<'ctx> for LlzkStructInfo<'ctx, '_> {
+impl<'ctx> ContractTargetInfo<'ctx> for LlzkContractTarget<'ctx, '_> {
     type TypeSystem = MlirTypeSystem<'ctx>;
 
-    fn inputs(&self) -> impl Iterator<Item = Type<'ctx>> {
+    fn inputs(&self) -> impl Iterator<Item = InputInfo<'ctx, Type<'ctx>>> {
         let f = match self {
-            LlzkStructInfo::Struct(op) => op.get_compute_func(),
-            LlzkStructInfo::Function(op) => Some(*op),
+            Self::Struct(op) => op.get_compute_func(),
+            Self::Function(op) => Some(*op),
         }
         .unwrap();
         let arg_count = f
@@ -112,14 +114,39 @@ impl<'ctx> StructInfo<'ctx> for LlzkStructInfo<'ctx, '_> {
             .first_block()
             .map(|block| block.argument_count())
             .unwrap_or_default();
-        (0..arg_count)
-            .map(move |n| unsafe { Type::from_raw(f.argument(n).unwrap().r#type().to_raw()) })
+        (0..arg_count).map(move |n| {
+            let name = f
+                .argument_attr(n, "function.arg_name")
+                .and_then(|a| Ok(StringAttribute::try_from(a)?.value()))
+                .ok();
+            let t = unsafe { Type::from_raw(f.argument(n).unwrap().r#type().to_raw()) };
+
+            match name {
+                Some(name) => InputInfo::named(name, t),
+                None => InputInfo::unnamed(t),
+            }
+        })
+    }
+
+    fn outputs(&self) -> impl Iterator<Item = OutputInfo<'ctx, Type<'ctx>>> {
+        match self {
+            LlzkContractTarget::Struct(_) => None,
+            LlzkContractTarget::Function(op_ref) => Some(op_ref),
+        }
+        .into_iter()
+        .flat_map(|op_ref| op_ref.get_function_type())
+        .flat_map(|t| {
+            let count = t.result_count();
+            (0..count).map(move |n| t.result(n).unwrap())
+        })
+        // TODO: Try extract `function.res_name` for the output if available.
+        .map(OutputInfo::unnamed)
     }
 
     fn members(&self) -> impl Iterator<Item = MemberInfo<'ctx, Type<'ctx>>> {
         match self {
-            LlzkStructInfo::Struct(op) => Some(op),
-            LlzkStructInfo::Function(_) => None,
+            Self::Struct(op) => Some(op),
+            Self::Function(_) => None,
         }
         .into_iter()
         .flat_map(|op| op.get_member_defs())
@@ -134,8 +161,8 @@ impl<'ctx> StructInfo<'ctx> for LlzkStructInfo<'ctx, '_> {
 
     fn template_params(&self) -> impl Iterator<Item = ParamInfo<'ctx, Type<'ctx>>> {
         match self {
-            LlzkStructInfo::Struct(op) => op.parent_operation(),
-            LlzkStructInfo::Function(op) => op.parent_operation(),
+            Self::Struct(op) => op.parent_operation(),
+            Self::Function(op) => op.parent_operation(),
         }
         .into_iter()
         .filter_map(|op| TemplateOpRef::try_from(op).ok())
@@ -161,8 +188,8 @@ impl<'ctx> StructInfo<'ctx> for LlzkStructInfo<'ctx, '_> {
 
         let mut info = vec![];
         let op_ref: OperationRef = match *self {
-            LlzkStructInfo::Struct(op_ref) => op_ref.into(),
-            LlzkStructInfo::Function(op_ref) => op_ref.into(),
+            Self::Struct(op_ref) => op_ref.into(),
+            Self::Function(op_ref) => op_ref.into(),
         };
         op_ref.walk(WalkOrder::PreOrder, |op| {
             let i = op.name();
@@ -172,7 +199,7 @@ impl<'ctx> StructInfo<'ctx> for LlzkStructInfo<'ctx, '_> {
                     info.push(LoopInfo::new_for_loop(
                         label,
                         ts,
-                        // `scf.for` loops have 3 base operands (lb, up, stride) and then is extra arguments.
+                        // `scf.for` loops have 3 base operands (lb, up, stride) and then its extra arguments.
                         // The types for those 3 operands + the inductive variable are handled
                         // by the constructor.
                         op.operands()
@@ -196,8 +223,8 @@ impl<'ctx> StructInfo<'ctx> for LlzkStructInfo<'ctx, '_> {
 
     fn self_type(&self) -> Option<Type<'ctx>> {
         match self {
-            LlzkStructInfo::Struct(op) => Some(op.r#type().into()),
-            LlzkStructInfo::Function(_) => None,
+            Self::Struct(op) => Some(op.r#type().into()),
+            Self::Function(_) => None,
         }
     }
 }

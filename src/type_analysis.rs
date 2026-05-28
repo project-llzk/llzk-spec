@@ -205,7 +205,7 @@ pub trait StructTypeProperties {
     fn get_member(&self, name: &str) -> Option<Self::Type>;
 
     /// Returns the list of members in the struct.
-    fn members(&self) -> Vec<Self::Type>;
+    fn member_types(&self) -> Vec<Self::Type>;
 
     /// Changes the types of the members.
     fn map_members(&self, map: impl FnMut(&Self::Type) -> Self::Type) -> Self;
@@ -243,9 +243,9 @@ pub trait TypeProperties: Sized {
             || (self.is_func_type() && self.to_func_type().is_some_and(|f| f.contains_type_vars()))
             || (self.is_array_type()
                 && self.to_array_type().is_some_and(|a| a.contains_type_vars()))
-            || (self.is_struct_type()
+            || (self.is_struct_like_type()
                 && self
-                    .to_struct_type()
+                    .to_struct_like_type()
                     .is_some_and(|s| s.contains_type_vars()))
     }
 
@@ -256,10 +256,10 @@ pub trait TypeProperties: Sized {
     fn to_array_type(&self) -> Option<Self::ArrayType>;
 
     /// Returns true if the type is a struct-like type.
-    fn is_struct_type(&self) -> bool;
+    fn is_struct_like_type(&self) -> bool;
 
     /// Converts the type into the concrete struct-like type representation.
-    fn to_struct_type(&self) -> Option<Self::StructType>;
+    fn to_struct_like_type(&self) -> Option<Self::StructType>;
 
     /// Return true if the types can resolve their unification.
     ///
@@ -290,45 +290,94 @@ pub trait CircuitInfo<'info>: Copy {
     /// Type system used by the information provider.
     type TypeSystem: TypeSystem;
 
-    /// Looks up a struct definition by name.
-    fn find_struct(
+    /// Looks up a contract target definition by name.
+    fn find_contract_target(
         &self,
         name: &Identifier,
-    ) -> Result<impl StructInfo<'info, TypeSystem = Self::TypeSystem>, Self::Error>;
+    ) -> Result<impl ContractTargetInfo<'info, TypeSystem = Self::TypeSystem>, Self::Error>;
 }
 
-/// Trait that gives information about a struct in a circuit.
+/// Trait that gives information about a contract target in a circuit.
 ///
 /// Implementations of this trait should return data that helps build the locals environment when
 /// type-checking a contract's body.
-pub trait StructInfo<'info> {
+pub trait ContractTargetInfo<'info> {
     /// Type system used by the information provider.
     type TypeSystem: TypeSystem;
 
-    /// Returns the list of input arguments of the struct in declaration order.
-    fn inputs(&self) -> impl Iterator<Item = <Self::TypeSystem as TypeSystem>::Type>;
+    /// Returns the list of input arguments of the target in declaration order.
+    fn inputs(
+        &self,
+    ) -> impl Iterator<Item = InputInfo<'info, <Self::TypeSystem as TypeSystem>::Type>>;
 
-    /// Returns the list of members of the struct.
+    /// Returns the list of outputs of the target in declaration order.
+    fn outputs(
+        &self,
+    ) -> impl Iterator<Item = OutputInfo<'info, <Self::TypeSystem as TypeSystem>::Type>>;
+
+    /// Returns the list of member's of the target.
     fn members(
         &self,
     ) -> impl Iterator<Item = MemberInfo<'info, <Self::TypeSystem as TypeSystem>::Type>>;
 
-    /// Returns the list of template parameters associated with the struct.
+    /// Returns the list of template parameters associated with the target.
     fn template_params(
         &self,
     ) -> impl Iterator<Item = ParamInfo<'info, <Self::TypeSystem as TypeSystem>::Type>>;
 
-    /// Returns the list of loops defined inside the struct.
+    /// Returns the list of loops defined inside the target.
     fn loops(
         &self,
         ts: &mut Self::TypeSystem,
     ) -> Vec<LoopInfo<<Self::TypeSystem as TypeSystem>::Type>>;
 
-    /// Returns the type of the struct.
+    /// Returns the type of the target.
     fn self_type(&self) -> Option<<Self::TypeSystem as TypeSystem>::Type>;
 }
 
-/// Information about a struct's member.
+/// Information about a contract target's input argument.
+pub struct InputInfo<'ctx, T> {
+    name: Option<&'ctx str>,
+    r#type: T,
+}
+
+impl<'ctx, T> InputInfo<'ctx, T> {
+    /// Creates a new info struct for a named input.
+    pub fn named(name: &'ctx str, r#type: T) -> Self {
+        Self {
+            name: Some(name),
+            r#type,
+        }
+    }
+
+    /// Creates a new info struct for an unnamed input.
+    pub fn unnamed(r#type: T) -> Self {
+        Self { name: None, r#type }
+    }
+}
+
+/// Information about a contract target's output.
+pub struct OutputInfo<'ctx, T> {
+    name: Option<&'ctx str>,
+    r#type: T,
+}
+
+impl<'ctx, T> OutputInfo<'ctx, T> {
+    /// Creates a new info struct for a named output.
+    pub fn named(name: &'ctx str, r#type: T) -> Self {
+        Self {
+            name: Some(name),
+            r#type,
+        }
+    }
+
+    /// Creates a new info struct for an unnamed output.
+    pub fn unnamed(r#type: T) -> Self {
+        Self { name: None, r#type }
+    }
+}
+
+/// Information about a contract target's member.
 pub struct MemberInfo<'ctx, T> {
     name: &'ctx str,
     r#type: T,

@@ -157,7 +157,7 @@ impl<'ast, T: TypeSystem> TypeInferenceCtx<'ast, T> {
         mem: &T::Type,
         errs: &mut Vec<TypeAnalysisError>,
     ) {
-        let Some(str) = str.to_struct_type() else {
+        let Some(str) = str.to_struct_like_type() else {
             errs.push(TypeAnalysisError::ExpectedStruct(str.to_string()));
             return;
         };
@@ -223,7 +223,7 @@ impl<'ast, T: TypeSystem> TypeInferenceCtx<'ast, T> {
             return t.map_inner(Self::apply(&t.inner_type(), subst, ts)).into();
         }
 
-        if let Some(t) = t.to_struct_type() {
+        if let Some(t) = t.to_struct_like_type() {
             return t.map_members(|t| Self::apply(t, subst, ts)).into();
         }
 
@@ -263,8 +263,11 @@ impl<'ast, T: TypeSystem> TypeInferenceCtx<'ast, T> {
             return Self::occurs(id, &t.inner_type(), subst, ts);
         }
 
-        if let Some(t) = t.to_struct_type() {
-            return t.members().iter().any(|i| Self::occurs(id, i, subst, ts));
+        if let Some(t) = t.to_struct_like_type() {
+            return t
+                .member_types()
+                .iter()
+                .any(|i| Self::occurs(id, i, subst, ts));
         }
 
         false
