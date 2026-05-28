@@ -28,7 +28,7 @@ impl<'ctx, 'ast, T: TypeSystem> InvariantTypeChecker<'ctx, 'ast, T> {
     fn block_cfg() -> BlockTypeCheckerCfg {
         BlockTypeCheckerCfg {
             allows_invariants: false,
-            allows_scoped: true, // ?
+            allows_scoped: true,
             allows_ensure_and_require: true,
             allows_return: false,
             allows_invariant_stmts: true,

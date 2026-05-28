@@ -396,6 +396,10 @@ impl<'ctx, T> MemberInfo<'ctx, T> {
 }
 
 /// Information about a template parameter.
+///
+/// From the point of view of the spec language both `poly.param` and `poly.expr` are refered to by
+/// their name, without making a distinction. Therefore, this struct can contain information about
+/// either.
 pub struct ParamInfo<'ctx, T> {
     name: &'ctx str,
     r#type: Option<T>,
