@@ -84,6 +84,14 @@ pub struct MockArrayType {
     inner: Box<MockType>,
 }
 
+impl MockArrayType {
+    pub fn new(inner: MockType) -> Self {
+        Self {
+            inner: Box::new(inner),
+        }
+    }
+}
+
 /// Mock struct type intended for testing.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MockStructType {

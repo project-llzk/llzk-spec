@@ -141,6 +141,7 @@ impl<'ast, T: TypeSystem> TypeInferenceCtx<'ast, T> {
         elt: &T::Type,
         errs: &mut Vec<TypeAnalysisError>,
     ) {
+        let arr = Self::apply(arr, &self.subst, &mut self.ts);
         let Some(arr) = arr.to_array_type() else {
             errs.push(TypeAnalysisError::ExpectedArray(arr.to_string()));
             return;
@@ -156,6 +157,7 @@ impl<'ast, T: TypeSystem> TypeInferenceCtx<'ast, T> {
         mem: &T::Type,
         errs: &mut Vec<TypeAnalysisError>,
     ) {
+        let str = Self::apply(str, &self.subst, &mut self.ts);
         let Some(str) = str.to_struct_like_type() else {
             errs.push(TypeAnalysisError::ExpectedStruct(str.to_string()));
             return;
@@ -388,6 +390,31 @@ mod tests {
     }
 
     #[test]
+    fn unify_5() {
+        let ast = AstContext::new();
+        let mut ctx = ctx(&ast);
+        let lhs = ctx.ts().fresh_var();
+        let rhs = MockArrayType::new(ctx.ts().bool_type());
+        ctx.add_array_constraint(rhs.into(), lhs);
+        ctx.unify().unwrap();
+    }
+
+    #[test]
+    fn unify_6() {
+        let ast = AstContext::new();
+        let mut ctx = ctx(&ast);
+        let lhs = ctx.ts().fresh_var();
+        let xxx = ctx.ts().fresh_var();
+        let rhs = MockArrayType::new(ctx.ts().bool_type());
+        // Transitive constraint that lhs is the array element of rhs.
+        //   xxx ~~ rhs
+        //   xxx ~array of~ lhs
+        ctx.add_constraint(xxx.clone(), rhs.into());
+        ctx.add_array_constraint(xxx, lhs);
+        ctx.unify().unwrap();
+    }
+
+    #[test]
     #[should_panic]
     fn unify_fail_1() {
         let ast = AstContext::new();
@@ -438,6 +465,17 @@ mod tests {
             assert_eq!(errs.len(), 1);
             panic!("{}", errs[0]);
         });
+    }
+
+    #[test]
+    #[should_panic]
+    fn unify_fail_5() {
+        let ast = AstContext::new();
+        let mut ctx = ctx(&ast);
+        let lhs = ctx.ts().felt_type();
+        let rhs = MockArrayType::new(ctx.ts().bool_type());
+        ctx.add_array_constraint(rhs.into(), lhs);
+        ctx.unify().unwrap();
     }
 
     #[test]
