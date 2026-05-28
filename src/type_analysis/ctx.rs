@@ -49,7 +49,6 @@ impl<'ast, T: TypeSystem> TypeInferenceCtx<'ast, T> {
         if lhs == rhs {
             return;
         }
-
         self.constraints.push(Constraint::new(lhs, rhs))
     }
 

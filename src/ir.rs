@@ -183,7 +183,8 @@ impl<'ctx> TypeProperties for Type<'ctx> {
         if (self.is_index() && is_felt_type(*other)) || (is_felt_type(*self) && other.is_index()) {
             return true;
         }
-        types_unify(*self, *other)
+        // Go by equality
+        *self == *other
     }
 
     fn is_struct_like_type(&self) -> bool {
