@@ -18,7 +18,6 @@ use crate::{
 /// entities like predicates. The parameter `P` represents an additional payload type that is appended to
 /// each scope that clients can use for augmenting them with data specific to their use case.
 pub struct ScopeStack<'ast, L, F, P = ()> {
-    root: Scope<'ast, L, F, P>,
     scopes: Vec<Scope<'ast, L, F, P>>,
 }
 
@@ -28,14 +27,13 @@ impl<'ast, L, F, P> ScopeStack<'ast, L, F, P> {
     /// There is no need of pushing a scope before using the stack.
     pub fn new(root_payload: P) -> Self {
         Self {
-            root: Scope::new(true, root_payload),
-            scopes: vec![],
+            scopes: vec![Scope::new(true, root_payload)],
         }
     }
 
     /// Returns a reference to the top of the stack.
     pub fn top(&mut self) -> &mut Scope<'ast, L, F, P> {
-        self.scopes.last_mut().unwrap_or(&mut self.root)
+        self.scopes.last_mut().expect("at least one scope")
     }
 
     /// Pushes a new scope.
@@ -52,7 +50,12 @@ impl<'ast, L, F, P> ScopeStack<'ast, L, F, P> {
     }
 
     /// Pops the top scope.
+    ///
+    /// # Panics
+    ///
+    /// If attempted to pop the root scope.
     pub fn pop(&mut self) {
+        assert!(self.scopes.len() > 1, "cannot pop the root scope");
         self.scopes.pop();
     }
 
@@ -95,7 +98,7 @@ impl<'ast, L, F, P> ScopeStack<'ast, L, F, P> {
 
     /// Returns an iterator of the scopes in stack order top (most nested scope) to bottom (root scope).
     pub fn ordered_scopes(&self) -> impl Iterator<Item = &Scope<'ast, L, F, P>> {
-        self.scopes.iter().rev().chain([&self.root])
+        self.scopes.iter().rev()
     }
 
     /// Returns an iterator of the scopes in stack order top (most nested scope) to bottom (root scope) until a local limit is
@@ -134,7 +137,7 @@ impl<'ast, L, F, P> ScopeStack<'ast, L, F, P> {
 
     /// Returns an iterator of mutable references to the scopes in stack order top (most nested scope) to bottom (root scope).
     pub fn ordered_scopes_mut(&mut self) -> impl Iterator<Item = &mut Scope<'ast, L, F, P>> {
-        self.scopes.iter_mut().rev().chain([&mut self.root])
+        self.scopes.iter_mut().rev()
     }
 
     /// Returns an iterator of mutable references to all the type bindings of locals.
