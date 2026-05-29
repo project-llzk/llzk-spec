@@ -206,7 +206,12 @@ impl<'ctx> ArrayTypeProperties for ArrayType<'ctx> {
     type Type = Type<'ctx>;
 
     fn inner_type(&self) -> Self::Type {
-        self.element_type()
+        let dims = self.dims();
+        if dims.len() == 1 {
+            self.element_type()
+        } else {
+            ArrayType::new(self.element_type(), &dims[1..]).into()
+        }
     }
 
     fn contains_type_vars(&self) -> bool {
