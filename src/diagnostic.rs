@@ -1,7 +1,10 @@
 //! Diagnostic and error types for the compiler.
 
 use crate::ast::Span;
-use std::fmt::{self, Display};
+use std::{
+    fmt::{self, Display},
+    str::Utf8Error,
+};
 use thiserror::Error;
 
 /// User-facing diagnostic emitted during parsing or semantic verification.
@@ -86,6 +89,16 @@ pub enum CompileError {
     Syntax(Diagnostic),
     #[error("{0}")]
     Diagnostics(Diagnostics),
+    #[error(transparent)]
+    Llzk(#[from] llzk::error::Error),
+    #[error(transparent)]
+    Mlir(#[from] melior::Error),
+    #[error(transparent)]
+    Utf8(#[from] Utf8Error),
+    #[error(transparent)]
+    BigUint(#[from] num_bigint::ParseBigIntError),
+    #[error("cli error: {0}")]
+    Cli(String),
 }
 
 impl CompileError {

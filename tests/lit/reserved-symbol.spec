@@ -1,5 +1,5 @@
 // REQUIRES: llzk-spec
-// RUN: %llzk_spec --spec %s --llzk %S/Inputs/reserved-symbol.llzk --emit-ast - --format json | FileCheck %s
+// RUN: %llzk_spec --spec %s --llzk %S/Inputs/reserved-symbol.llzk --emit=ast --emit-format json | FileCheck %s
 // END.
 
 contract for ReservedNames {

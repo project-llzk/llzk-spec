@@ -34,6 +34,7 @@ pub trait Visitable: Sized {
 }
 
 impl<V: Visitable> Visitable for Box<V> {}
+impl<V: Visitable> Visitable for Vec<V> {}
 
 /// Source location of an AST node.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Default)]
@@ -42,6 +43,12 @@ pub struct Span {
     pub end: usize,
     pub line: usize,
     pub column: usize,
+}
+
+impl Spanned for Span {
+    fn span(&self) -> Span {
+        *self
+    }
 }
 
 /// Trait for AST entities that have a [`Span`]
@@ -64,6 +71,10 @@ impl<'a, M> Identifier<'a, M> {
 
     pub fn symbol(&self) -> Symbol<'a> {
         self.name
+    }
+
+    pub fn meta(&self) -> &M {
+        &self.meta
     }
 }
 
@@ -531,11 +542,31 @@ impl<M> Spanned for Expression<'_, M> {
 impl<M> Visitable for Expression<'_, M> {}
 
 /// Supported quantifier kinds.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum QuantifierKind {
     Forall,
     Exists,
+}
+
+impl std::fmt::Display for QuantifierKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            if f.alternate() {
+                match self {
+                    QuantifierKind::Forall => "∀",
+                    QuantifierKind::Exists => "∃",
+                }
+            } else {
+                match self {
+                    QuantifierKind::Forall => "forall",
+                    QuantifierKind::Exists => "exists",
+                }
+            }
+        )
+    }
 }
 
 /// Domain over which a quantifier applies.
@@ -582,12 +613,51 @@ pub enum BinaryOp {
     Pow,
 }
 
+impl std::fmt::Display for BinaryOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                BinaryOp::Or => "||",
+                BinaryOp::And => "&&",
+                BinaryOp::Eq => "==",
+                BinaryOp::Ne => "!=",
+                BinaryOp::Lt => "<",
+                BinaryOp::Le => "<=",
+                BinaryOp::Gt => ">",
+                BinaryOp::Ge => ">=",
+                BinaryOp::Add => "+",
+                BinaryOp::Sub => "-",
+                BinaryOp::Mul => "*",
+                BinaryOp::Div => "/",
+                BinaryOp::Mod => "%",
+                BinaryOp::BitAnd => "&",
+                BinaryOp::Pow => "**",
+            }
+        )
+    }
+}
+
 /// Unary operators recognized by the grammar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum UnaryOp {
     Not,
     Neg,
+}
+
+impl std::fmt::Display for UnaryOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                UnaryOp::Not => "!",
+                UnaryOp::Neg => "-",
+            }
+        )
+    }
 }
 
 /// Interned symbol in the AST context.

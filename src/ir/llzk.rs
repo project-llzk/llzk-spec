@@ -4,8 +4,13 @@
 //! In future iterations, we will add functionality to emit `verif` dialect IR,
 //! either combined with the LLZK IR or in a separate file.
 
+use crate::ast::Identifier;
 use crate::diagnostic::CompileError;
-use llzk::context::LlzkContext;
+use crate::ir::MlirTypeSystem;
+use crate::type_analysis::loops::{LoopInfo, LoopLabel};
+use crate::type_analysis::{
+    CircuitInfo, ContractTargetInfo, InputInfo, MemberInfo, OutputInfo, ParamInfo,
+};
 use llzk::dialect::{
     array::ArrayType,
     function::{FuncDefOpLike, is_func_def},
@@ -13,19 +18,216 @@ use llzk::dialect::{
     r#struct::{MemberDefOpLike, StructDefOpLike, StructType, is_struct_def},
 };
 use llzk::operation::WalkOperationMutLike;
-use llzk::prelude::{FuncDefOpRefMut, PodType, StructDefOpRef, TemplateOpLike};
-use melior::{
-    dialect::DialectRegistry,
-    ir::{
-        Module, OperationRef, Type,
-        attribute::FlatSymbolRefAttribute,
-        attribute::StringAttribute,
-        operation::{OperationLike, WalkOrder, WalkResult},
-    },
-    utility::register_all_dialects,
+use llzk::prelude::{
+    FuncDefOpRef, FuncDefOpRefMut, PodType, StructDefOpRef, TemplateOpLike, TemplateOpRef,
+    TemplateSymbolBindingOpLike as _,
+};
+use melior::ir::{BlockLike, RegionLike, TypeLike as _, ValueLike};
+use melior::ir::{
+    Module, OperationRef, Type,
+    attribute::FlatSymbolRefAttribute,
+    attribute::StringAttribute,
+    operation::{OperationLike, WalkOrder, WalkResult},
 };
 use mlir_sys::mlirOperationGetParentOperation;
 use std::collections::{HashMap, HashSet};
+
+mod error;
+
+/// Implementation of [`CircuitInfo`] for LLZK circuits.
+#[derive(Copy, Clone)]
+pub struct LlzkInfo<'ctx, 'm> {
+    /// The MLIR module that defines the LLZK circuit.
+    module: &'m Module<'ctx>,
+}
+
+impl<'ctx, 'm> LlzkInfo<'ctx, 'm> {
+    /// Creates a new info provider.
+    pub fn new(module: &'m Module<'ctx>) -> Self {
+        Self { module }
+    }
+}
+
+impl<'ctx> CircuitInfo<'ctx> for LlzkInfo<'ctx, '_> {
+    type Error = error::Error;
+
+    type TypeSystem = MlirTypeSystem<'ctx>;
+
+    fn find_contract_target(
+        &self,
+        name: &Identifier,
+    ) -> Result<impl ContractTargetInfo<'ctx, TypeSystem = Self::TypeSystem>, Self::Error> {
+        let mut result = None;
+        self.module
+            .as_operation()
+            .walk(WalkOrder::PreOrder, |operation| {
+                if let Some(struct_op) = StructDefOpRef::from_option_raw(operation.to_raw()) {
+                    let fqn =
+                        struct_contract_target_name(&struct_op, StructDefOpLike::name(&struct_op));
+                    if fqn == name.value() {
+                        result = Some(LlzkContractTarget::Struct(struct_op));
+                        return WalkResult::Interrupt;
+                    } else {
+                        // Don't walk inside the operation since there isn't anything interesting to
+                        // look at.
+                        return WalkResult::Skip;
+                    }
+                }
+
+                if let Some(func_op) = FuncDefOpRef::from_option_raw(operation.to_raw()) {
+                    let fqn = StringAttribute::try_from(func_op.fully_qualified_name()).unwrap();
+                    if fqn.value() == name.value() {
+                        result = Some(LlzkContractTarget::Function(func_op));
+                        return WalkResult::Interrupt;
+                    } else {
+                        // Don't walk inside the operation since there isn't anything interesting to
+                        // look at.
+                        return WalkResult::Skip;
+                    }
+                }
+
+                WalkResult::Advance
+            });
+
+        result.ok_or_else(|| error::Error::ContractTargetNotFound(name.value().to_owned()))
+    }
+}
+
+/// Implementation of [`ContractTargetInfo`] for LLZK structs and functions.
+enum LlzkContractTarget<'ctx, 'op> {
+    Struct(StructDefOpRef<'ctx, 'op>),
+    Function(FuncDefOpRef<'ctx, 'op>),
+}
+
+impl<'ctx> ContractTargetInfo<'ctx> for LlzkContractTarget<'ctx, '_> {
+    type TypeSystem = MlirTypeSystem<'ctx>;
+
+    fn inputs(&self) -> impl Iterator<Item = InputInfo<'ctx, Type<'ctx>>> {
+        let f = match self {
+            Self::Struct(op) => op.get_compute_func(),
+            Self::Function(op) => Some(*op),
+        }
+        .unwrap();
+        let arg_count = f
+            .region(0)
+            .unwrap()
+            .first_block()
+            .map(|block| block.argument_count())
+            .unwrap_or_default();
+        (0..arg_count).map(move |n| {
+            let name = f
+                .argument_attr(n, "function.arg_name")
+                .and_then(|a| Ok(StringAttribute::try_from(a)?.value()))
+                .ok();
+            let t = unsafe { Type::from_raw(f.argument(n).unwrap().r#type().to_raw()) };
+
+            match name {
+                Some(name) => InputInfo::named(name, t),
+                None => InputInfo::unnamed(t),
+            }
+        })
+    }
+
+    fn outputs(&self) -> impl Iterator<Item = OutputInfo<'ctx, Type<'ctx>>> {
+        match self {
+            LlzkContractTarget::Struct(_) => None,
+            LlzkContractTarget::Function(op_ref) => Some(op_ref),
+        }
+        .into_iter()
+        .flat_map(|op_ref| op_ref.get_function_type())
+        .flat_map(|t| {
+            let count = t.result_count();
+            (0..count).map(move |n| t.result(n).unwrap())
+        })
+        // TODO: Try extract `function.res_name` for the output if available.
+        .map(OutputInfo::unnamed)
+    }
+
+    fn members(&self) -> impl Iterator<Item = MemberInfo<'ctx, Type<'ctx>>> {
+        match self {
+            Self::Struct(op) => Some(op),
+            Self::Function(_) => None,
+        }
+        .into_iter()
+        .flat_map(|op| op.get_member_defs())
+        .map(move |m| {
+            MemberInfo::new(
+                m.member_name(),
+                unsafe { Type::from_raw(m.member_type().to_raw()) },
+                m.has_public_attr(),
+            )
+        })
+    }
+
+    fn template_params(&self) -> impl Iterator<Item = ParamInfo<'ctx, Type<'ctx>>> {
+        match self {
+            Self::Struct(op) => op.parent_operation(),
+            Self::Function(op) => op.parent_operation(),
+        }
+        .into_iter()
+        .filter_map(|op| TemplateOpRef::try_from(op).ok())
+        .flat_map(|op| op.const_binding_ops())
+        .map(|op| {
+            ParamInfo::new(
+                op.sym_name(),
+                op.type_opt().map(|t| unsafe { Type::from_raw(t.to_raw()) }),
+            )
+        })
+    }
+
+    fn loops(&self, ts: &mut Self::TypeSystem) -> Vec<LoopInfo<Type<'ctx>>> {
+        fn create_label<'c: 'a, 'a>(operation: OperationRef<'c, 'a>, next_id: usize) -> LoopLabel {
+            operation
+                .attribute("loop_label")
+                .ok()
+                .and_then(|attribute| StringAttribute::try_from(attribute).ok())
+                .map(|attribute| attribute.value())
+                .map(LoopLabel::named)
+                .unwrap_or(LoopLabel::implicit(next_id))
+        }
+
+        let mut info = vec![];
+        let op_ref: OperationRef = match *self {
+            Self::Struct(op_ref) => op_ref.into(),
+            Self::Function(op_ref) => op_ref.into(),
+        };
+        op_ref.walk(WalkOrder::PreOrder, |op| {
+            let i = op.name();
+            let label = create_label(op, info.len());
+            match i.as_string_ref().as_str().ok().unwrap() {
+                "scf.for" => {
+                    info.push(LoopInfo::new_for_loop(
+                        label,
+                        ts,
+                        // `scf.for` loops have 3 base operands (lb, up, stride) and then its extra arguments.
+                        // The types for those 3 operands + the inductive variable are handled
+                        // by the constructor.
+                        op.operands()
+                            .skip(3)
+                            .map(|v| unsafe { Type::from_raw(v.r#type().to_raw()) }),
+                    ));
+                }
+                "scf.while" => {
+                    info.push(LoopInfo::new_while_loop(
+                        label,
+                        op.operands()
+                            .map(|v| unsafe { Type::from_raw(v.r#type().to_raw()) }),
+                    ));
+                }
+                _ => {}
+            };
+            WalkResult::Advance
+        });
+        info
+    }
+
+    fn self_type(&self) -> Option<Type<'ctx>> {
+        match self {
+            Self::Struct(op) => Some(op.r#type().into()),
+            Self::Function(_) => None,
+        }
+    }
+}
 
 /// Kind of loop operation discovered in LLZK IR.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -105,13 +307,8 @@ impl IrMetadata {
 
 /// Parses an LLZK IR module and extracts the metadata needed for symbol verification.
 pub fn load_ir(source_name: &str, source: &str) -> Result<IrMetadata, CompileError> {
-    let context = LlzkContext::new_no_log();
-    let registry = DialectRegistry::new();
-    register_all_dialects(&registry);
-    context.append_dialect_registry(&registry);
-    context.load_all_available_dialects();
-    let mut module = Module::parse(&context, source)
-        .ok_or_else(|| CompileError::Ir(format!("{source_name}: failed to parse LLZK IR")))?;
+    let context = super::Context::new();
+    let mut module = context.parse_module(source_name, source)?;
 
     extract_metadata(source_name, &mut module)
 }

@@ -25,6 +25,15 @@ impl AstContext {
         }
     }
 
+    /// Creates a symbol of the given string.
+    ///
+    /// If the symbol is fresh the string is moved directly.
+    pub fn new_symbol(&self, symbol: String) -> Symbol<'_> {
+        Symbol {
+            inner: self.symbols_arena.intern_string(symbol),
+        }
+    }
+
     /// Returns a literal allocated inside the context.
     pub fn literal<'a>(&'a self, literal: BigUint) -> Literal<'a> {
         Literal {
