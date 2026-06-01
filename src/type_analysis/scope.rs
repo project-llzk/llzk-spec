@@ -169,20 +169,21 @@ impl<'ast, L, F> ScopeStack<'ast, L, F, ()> {
                     *l = r.clone();
                 }
             });
-        self.all_predicate_types()
-            .filter(|f| f.contains_type_vars())
-            .for_each(|f| {
-                let mut ins = f.inputs().to_vec();
-                let mut outs = f.outputs().to_vec();
-                for i in ins.iter_mut() {
-                    let _ = propagate_type::<T, L>(i, subst);
-                }
-                for o in outs.iter_mut() {
-                    let _ = propagate_type::<T, L>(o, subst);
-                }
-                let r = ts.func_type(&ins, &outs);
-                *f = r;
-            });
+        self.all_predicate_types().for_each(|f| {
+            if !f.contains_type_vars() {
+                return;
+            }
+            let mut ins = f.inputs().to_vec();
+            let mut outs = f.outputs().to_vec();
+            for i in ins.iter_mut() {
+                let _ = propagate_type::<T, L>(i, subst);
+            }
+            for o in outs.iter_mut() {
+                let _ = propagate_type::<T, L>(o, subst);
+            }
+            let r = ts.func_type(&ins, &outs);
+            *f = r;
+        });
 
         fn propagate_type<T, L>(l: &mut L, subst: &Subst<T>) -> Option<()>
         where

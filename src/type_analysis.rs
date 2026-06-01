@@ -131,7 +131,11 @@ pub trait TypeSystem {
         + PartialEq
         + std::fmt::Display
         + std::fmt::Debug
-        + TypeProperties<FnType = Self::FnType>;
+        + TypeProperties<
+            FnType = Self::FnType,
+            ArrayType = Self::ArrayType,
+            StructType = Self::StructType,
+        >;
 
     /// Type used for representing function types.
     type FnType: Clone
@@ -155,7 +159,9 @@ pub trait TypeSystem {
         + std::fmt::Display
         + std::fmt::Debug
         + Into<Self::Type>
-        + StructTypeProperties<Type = Self::Type>;
+        + StructTypeProperties<Type = Self::Type, Scope = Self::Scope>;
+    /// Type used to represent the scope of the types.
+    type Scope;
 
     /// Create a boolean type.
     fn bool_type(&mut self) -> Self::Type;
@@ -174,6 +180,9 @@ pub trait TypeSystem {
         let bool = self.bool_type();
         self.func_type(ins, &[bool])
     }
+
+    /// Returns a reference to the scope.
+    fn scope(&mut self) -> &Self::Scope;
 }
 
 /// Trait for obtaining information about function types.
@@ -195,6 +204,8 @@ pub trait FnTypeProperties {
 pub trait StructTypeProperties {
     /// Type used to represent generic types.
     type Type;
+    /// Type used to represent the scope of the types.
+    type Scope;
 
     /// Returns true if the array has type vars.
     fn contains_type_vars(&self) -> bool;
@@ -202,10 +213,10 @@ pub trait StructTypeProperties {
     /// Returns the type of a member in the struct.
     ///
     /// If the type does not have a member by that name returns `None`.
-    fn get_member(&self, name: &str) -> Option<Self::Type>;
+    fn member(&self, name: &str, scope: &Self::Scope) -> Option<Self::Type>;
 
     /// Returns the list of members in the struct.
-    fn member_types(&self) -> Vec<Self::Type>;
+    fn member_types(&self, scope: &Self::Scope) -> Vec<Self::Type>;
 
     /// Changes the types of the members.
     fn map_members(&self, map: impl FnMut(&Self::Type) -> Self::Type) -> Self;

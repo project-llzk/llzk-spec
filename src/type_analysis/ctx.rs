@@ -163,7 +163,7 @@ impl<'ast, T: TypeSystem> TypeInferenceCtx<'ast, T> {
             return;
         };
 
-        let Some(actual) = str.get_member(name.value()) else {
+        let Some(actual) = str.member(name.value(), self.ts().scope()) else {
             errs.push(TypeAnalysisError::ExpectedMember(
                 str.to_string(),
                 name.to_string(),
@@ -266,7 +266,7 @@ impl<'ast, T: TypeSystem> TypeInferenceCtx<'ast, T> {
 
         if let Some(t) = t.to_struct_like_type() {
             return t
-                .member_types()
+                .member_types(ts.scope())
                 .iter()
                 .any(|i| Self::occurs(id, i, subst, ts));
         }

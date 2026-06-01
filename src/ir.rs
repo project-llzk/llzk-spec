@@ -100,19 +100,24 @@ impl Default for Context {
 }
 
 /// Implementation of [`TypeSystem`] based on MLIR.
-pub struct MlirTypeSystem<'ctx> {
+pub struct MlirTypeSystem<'ctx, 'm> {
     ctx: &'ctx Context,
+    module: &'m Module<'ctx>,
     next_var: usize,
 }
 
-impl<'ctx> MlirTypeSystem<'ctx> {
+impl<'ctx, 'm> MlirTypeSystem<'ctx, 'm> {
     /// Creates a new type system.
-    pub fn new(ctx: &'ctx Context) -> Self {
-        Self { ctx, next_var: 0 }
+    pub fn new(ctx: &'ctx Context, module: &'m Module<'ctx>) -> Self {
+        Self {
+            ctx,
+            module,
+            next_var: 0,
+        }
     }
 }
 
-impl<'ctx> TypeSystem for MlirTypeSystem<'ctx> {
+impl<'ctx> TypeSystem for MlirTypeSystem<'ctx, '_> {
     // We are currently using `Type` since that's the obvious thing to do. However, if in the
     // future we want to do things like pretty printing the type in diagnostic messages (i.e.
     // printing `Bool` instead of `i1`) we can replace it with a wrapper.
@@ -125,6 +130,8 @@ impl<'ctx> TypeSystem for MlirTypeSystem<'ctx> {
     type ArrayType = ArrayType<'ctx>;
 
     type StructType = WrapStructLike<'ctx>;
+
+    type Scope = Module<'ctx>;
 
     fn bool_type(&mut self) -> Self::Type {
         self.ctx.bool_type()
@@ -143,13 +150,16 @@ impl<'ctx> TypeSystem for MlirTypeSystem<'ctx> {
         self.next_var += 1;
         TVarType::new(self.ctx.context(), StringRef::new(&format!("T{id}"))).into()
     }
+
+    fn scope(&mut self) -> &Self::Scope {
+        self.module
+    }
 }
 
 impl<'ctx> TypeProperties for Type<'ctx> {
     type FnType = WrapFunctionType<'ctx>;
     type ArrayType = ArrayType<'ctx>;
     type StructType = WrapStructLike<'ctx>;
-
     type VarId = &'ctx str;
 
     fn is_var_type(&self) -> bool {
@@ -278,8 +288,6 @@ impl std::fmt::Debug for WrapFunctionType<'_> {
 /// equivalent.
 #[derive(Copy, Clone)]
 pub enum WrapStructLike<'ctx> {
-    // TODO: All the functionality of the necessary traits is not implemented for the `StructType` case
-    // since it may require looking up and we don't have direct support for that.
     /// Wraps a [`StructType`].
     Struct(StructType<'ctx>),
     /// Wraps a [`PodType`].
@@ -331,10 +339,15 @@ impl std::fmt::Debug for WrapStructLike<'_> {
 
 impl<'ctx> StructTypeProperties for WrapStructLike<'ctx> {
     type Type = Type<'ctx>;
+    type Scope = Module<'ctx>;
 
     fn contains_type_vars(&self) -> bool {
         match self {
-            WrapStructLike::Struct(_) => todo!(),
+            WrapStructLike::Struct(t) => t
+                .params_vec()
+                .into_iter()
+                .filter_map(|a| TypeAttribute::try_from(a).ok().map(|t| t.value()))
+                .any(|t| t.contains_type_vars()),
             WrapStructLike::Pod(t) => t
                 .get_records()
                 .iter()
@@ -342,23 +355,61 @@ impl<'ctx> StructTypeProperties for WrapStructLike<'ctx> {
         }
     }
 
-    fn get_member(&self, member: &str) -> Option<Type<'ctx>> {
+    fn member(&self, member: &str, root: &Module<'ctx>) -> Option<Type<'ctx>> {
         match self {
-            WrapStructLike::Struct(_) => todo!(),
+            WrapStructLike::Struct(t) => {
+                let op = t.get_definition_from_module(root).ok()?;
+                let op = StructDefOpRef::try_from(op.get_operation()?).ok()?;
+                op.get_member_def(member)
+                    .and_then(|def| def.has_public_attr().then_some(def.member_type()))
+            }
             WrapStructLike::Pod(t) => t.get_type_of_record(member),
         }
     }
 
-    fn member_types(&self) -> Vec<Type<'ctx>> {
+    fn member_types(&self, root: &Module<'ctx>) -> Vec<Type<'ctx>> {
         match self {
-            WrapStructLike::Struct(_) => todo!(),
+            WrapStructLike::Struct(t) => {
+                let Ok(op) = t.get_definition_from_module(root) else {
+                    return vec![];
+                };
+                let Some(op) = op
+                    .get_operation()
+                    .and_then(|op| StructDefOpRef::try_from(op).ok())
+                else {
+                    return vec![];
+                };
+                op.get_member_defs()
+                    .into_iter()
+                    .filter_map(|def| def.has_public_attr().then_some(def.member_type()))
+                    .collect()
+            }
             WrapStructLike::Pod(t) => t.get_records().into_iter().map(|r| r.r#type()).collect(),
         }
     }
 
     fn map_members(&self, mut map: impl FnMut(&Self::Type) -> Self::Type) -> Self {
         match self {
-            WrapStructLike::Struct(_) => todo!(),
+            WrapStructLike::Struct(t) => {
+                // Map any type attributes that are type variables
+                let params = t
+                    .params_vec()
+                    .into_iter()
+                    .map(|a| {
+                        if let Ok(ta) = TypeAttribute::try_from(a) {
+                            TypeAttribute::new(match TVarType::try_from(ta.value()) {
+                                Ok(tvar) => map(&tvar.into()),
+                                _ => ta.value(),
+                            })
+                            .into()
+                        } else {
+                            a
+                        }
+                    })
+                    .collect::<Vec<_>>();
+
+                WrapStructLike::Struct(StructType::new(t.name(), &params))
+            }
             WrapStructLike::Pod(t) => {
                 let ctx = t.context();
                 let records = t
