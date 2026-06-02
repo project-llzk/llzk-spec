@@ -355,7 +355,7 @@ impl<'ctx> StructTypeProperties for WrapStructLike<'ctx> {
         }
     }
 
-    fn member(&self, member: &str, root: &Module<'ctx>) -> Option<Type<'ctx>> {
+    fn member(&self, member: &str, root: &Self::Scope) -> Option<Type<'ctx>> {
         match self {
             WrapStructLike::Struct(t) => {
                 let op = t.get_definition_from_module(root).ok()?;
@@ -367,7 +367,7 @@ impl<'ctx> StructTypeProperties for WrapStructLike<'ctx> {
         }
     }
 
-    fn member_types(&self, root: &Module<'ctx>) -> Vec<Type<'ctx>> {
+    fn member_types(&self, root: &Self::Scope) -> Vec<Type<'ctx>> {
         match self {
             WrapStructLike::Struct(t) => {
                 let Ok(op) = t.get_definition_from_module(root) else {

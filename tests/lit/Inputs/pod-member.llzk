@@ -1,6 +1,4 @@
 module attributes { llzk.lang } {
-    
-
     struct.def @Bar {
       struct.member @foo : !struct.pod<[@out : index]>
       function.def @compute() -> !struct.type<@Bar<[]>> attributes {function.allow_non_native_field_ops, function.allow_witness} {

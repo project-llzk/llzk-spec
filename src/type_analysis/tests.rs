@@ -258,11 +258,11 @@ impl StructTypeProperties for MockStructType {
         self.members.values().any(|t| t.contains_type_vars())
     }
 
-    fn member(&self, name: &str, _: &()) -> Option<Self::Type> {
+    fn member(&self, name: &str, _: &Self::Scope) -> Option<Self::Type> {
         self.members.get(name).cloned()
     }
 
-    fn member_types(&self, _: &()) -> Vec<Self::Type> {
+    fn member_types(&self, _: &Self::Scope) -> Vec<Self::Type> {
         self.members.values().cloned().collect()
     }
 
