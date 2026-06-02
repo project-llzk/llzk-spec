@@ -62,8 +62,7 @@ impl<'ctx> CircuitInfo<'ctx> for LlzkInfo<'ctx, '_> {
             .as_operation()
             .walk(WalkOrder::PreOrder, |operation| {
                 if let Some(struct_op) = StructDefOpRef::from_option_raw(operation.to_raw()) {
-                    let fqn =
-                        struct_contract_target_name(&struct_op, StructDefOpLike::name(&struct_op));
+                    let fqn = struct_contract_target_name(&struct_op, struct_op.sym_name());
                     if fqn == name.value() {
                         result = Some(LlzkContractTarget::Struct(struct_op));
                         return WalkResult::Interrupt;
@@ -104,7 +103,7 @@ impl<'ctx> ContractTargetInfo<'ctx> for LlzkContractTarget<'ctx, '_> {
 
     fn inputs(&self) -> impl Iterator<Item = InputInfo<'ctx, Type<'ctx>>> {
         let f = match self {
-            Self::Struct(op) => op.get_compute_func(),
+            Self::Struct(op) => op.compute_func(),
             Self::Function(op) => Some(*op),
         }
         .unwrap();
@@ -134,7 +133,7 @@ impl<'ctx> ContractTargetInfo<'ctx> for LlzkContractTarget<'ctx, '_> {
             LlzkContractTarget::Function(op_ref) => Some(op_ref),
         }
         .into_iter()
-        .flat_map(|op_ref| op_ref.get_function_type())
+        .flat_map(|op_ref| op_ref.function_type())
         .flat_map(|t| {
             let count = t.result_count();
             (0..count).map(move |n| t.result(n).unwrap())
@@ -149,7 +148,7 @@ impl<'ctx> ContractTargetInfo<'ctx> for LlzkContractTarget<'ctx, '_> {
             Self::Function(_) => None,
         }
         .into_iter()
-        .flat_map(|op| op.get_member_defs())
+        .flat_map(|op| op.member_defs())
         .map(move |m| {
             MemberInfo::new(
                 m.member_name(),
@@ -481,7 +480,7 @@ fn collect_struct_contract_metadata<'c: 'a, 'a>(
 ) -> ContractMetadata {
     let mut metadata = ContractMetadata::default();
 
-    for member in struct_op.get_member_defs() {
+    for member in struct_op.member_defs() {
         let member_name = member.member_name().to_string();
         metadata.visible_symbols.insert(member_name.clone());
         collect_member_paths(
@@ -494,9 +493,9 @@ fn collect_struct_contract_metadata<'c: 'a, 'a>(
     }
 
     for name in struct_op
-        .get_template_param_op_names()
+        .template_param_op_names()
         .into_iter()
-        .chain(struct_op.get_template_expr_op_names())
+        .chain(struct_op.template_expr_op_names())
     {
         metadata.visible_symbols.insert(flat_symbol_name(name));
     }
@@ -560,17 +559,17 @@ fn collect_struct_member_paths<'c: 'a, 'a>(
     parent_accessible: bool,
     member_paths: &mut HashMap<String, bool>,
 ) {
-    let Ok(lookup) = struct_type.get_definition(root) else {
+    let Ok(lookup) = struct_type.lookup_definition(root) else {
         return;
     };
-    let Some(operation) = lookup.get_operation() else {
+    let Some(operation) = lookup.operation() else {
         return;
     };
     let Ok(struct_def) = StructDefOpRef::try_from(operation) else {
         return;
     };
 
-    for member in struct_def.get_member_defs() {
+    for member in struct_def.member_defs() {
         let path = format!("{prefix}.{}", member.member_name());
         let accessible = parent_accessible && member.has_public_attr();
         member_paths.insert(path.clone(), accessible);
@@ -591,7 +590,7 @@ fn collect_pod_member_paths<'c: 'a, 'a>(
     parent_accessible: bool,
     member_paths: &mut HashMap<String, bool>,
 ) {
-    for record in pod_type.get_records() {
+    for record in pod_type.records() {
         let record_name = record
             .name()
             .as_string_ref()

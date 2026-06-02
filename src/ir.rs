@@ -335,24 +335,21 @@ impl<'ctx> StructTypeProperties for WrapStructLike<'ctx> {
     fn contains_type_vars(&self) -> bool {
         match self {
             WrapStructLike::Struct(_) => todo!(),
-            WrapStructLike::Pod(t) => t
-                .get_records()
-                .iter()
-                .any(|r| r.r#type().contains_type_vars()),
+            WrapStructLike::Pod(t) => t.records().iter().any(|r| r.r#type().contains_type_vars()),
         }
     }
 
     fn get_member(&self, member: &str) -> Option<Type<'ctx>> {
         match self {
             WrapStructLike::Struct(_) => todo!(),
-            WrapStructLike::Pod(t) => t.get_type_of_record(member),
+            WrapStructLike::Pod(t) => t.record_type(member),
         }
     }
 
     fn member_types(&self) -> Vec<Type<'ctx>> {
         match self {
             WrapStructLike::Struct(_) => todo!(),
-            WrapStructLike::Pod(t) => t.get_records().into_iter().map(|r| r.r#type()).collect(),
+            WrapStructLike::Pod(t) => t.records().into_iter().map(|r| r.r#type()).collect(),
         }
     }
 
@@ -362,7 +359,7 @@ impl<'ctx> StructTypeProperties for WrapStructLike<'ctx> {
             WrapStructLike::Pod(t) => {
                 let ctx = t.context();
                 let records = t
-                    .get_records()
+                    .records()
                     .into_iter()
                     .map(|r| {
                         let name = r.name();

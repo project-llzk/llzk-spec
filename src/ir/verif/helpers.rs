@@ -37,7 +37,7 @@ impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
         let func_op = self.create_func_def_op(decl.span(), decl.name())?;
         let func_op = self.bind_predicate(decl.name(), func_op)?;
 
-        let block = func_op.get_body()?.append_block(Block::new(&block_args));
+        let block = func_op.body()?.append_block(Block::new(&block_args));
 
         self.push_tagged(block, ScopeTag::Predicate);
 
