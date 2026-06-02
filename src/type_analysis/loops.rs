@@ -61,7 +61,7 @@ impl<T> LoopInfo<T> {
     }
 
     /// Symbolizes the label of the loop.
-    pub(super) fn symbolize_label<'ast>(&self, ast: &'ast AstContext) -> Symbol<'ast> {
+    pub fn symbolize_label<'ast>(&self, ast: &'ast AstContext) -> Symbol<'ast> {
         ast.new_symbol(self.label.to_string())
     }
 }

@@ -19,8 +19,8 @@ use llzk::dialect::{
 };
 use llzk::operation::WalkOperationMutLike;
 use llzk::prelude::{
-    FuncDefOpRef, FuncDefOpRefMut, PodType, StructDefOpRef, TemplateOpLike, TemplateOpRef,
-    TemplateSymbolBindingOpLike as _,
+    FuncDefOpRef, FuncDefOpRefMut, PodType, StructDefOpRef, SymbolRefAttribute, TemplateOpLike,
+    TemplateOpRef, TemplateSymbolBindingOpLike as _,
 };
 use melior::ir::{BlockLike, RegionLike, TypeLike as _, ValueLike};
 use melior::ir::{
@@ -53,9 +53,9 @@ impl<'ctx> CircuitInfo<'ctx> for LlzkInfo<'ctx, '_> {
 
     type TypeSystem = MlirTypeSystem<'ctx>;
 
-    fn find_contract_target(
+    fn find_contract_target<M>(
         &self,
-        name: &Identifier,
+        name: &Identifier<M>,
     ) -> Result<impl ContractTargetInfo<'ctx, TypeSystem = Self::TypeSystem>, Self::Error> {
         let mut result = None;
         self.module
@@ -93,9 +93,31 @@ impl<'ctx> CircuitInfo<'ctx> for LlzkInfo<'ctx, '_> {
 }
 
 /// Implementation of [`ContractTargetInfo`] for LLZK structs and functions.
-enum LlzkContractTarget<'ctx, 'op> {
+#[derive(Copy, Clone, Debug)]
+pub(super) enum LlzkContractTarget<'ctx, 'op> {
     Struct(StructDefOpRef<'ctx, 'op>),
     Function(FuncDefOpRef<'ctx, 'op>),
+}
+
+impl<'ctx, 'op> From<LlzkContractTarget<'ctx, 'op>> for OperationRef<'ctx, 'op> {
+    fn from(value: LlzkContractTarget<'ctx, 'op>) -> Self {
+        match value {
+            LlzkContractTarget::Struct(op_ref) => op_ref.into(),
+            LlzkContractTarget::Function(op_ref) => op_ref.into(),
+        }
+    }
+}
+
+impl<'ctx, 'op> OperationLike<'ctx, 'op> for LlzkContractTarget<'ctx, 'op> {
+    fn to_raw(&self) -> mlir_sys::MlirOperation {
+        OperationRef::from(*self).to_raw()
+    }
+}
+
+impl std::fmt::Display for LlzkContractTarget<'_, '_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(&OperationRef::from(*self), f)
+    }
 }
 
 impl<'ctx> ContractTargetInfo<'ctx> for LlzkContractTarget<'ctx, '_> {

@@ -15,6 +15,8 @@ pub enum ScopeTag {
     Root,
     /// Tag for predicate scopes.
     Predicate,
+    /// Tag for contract scopes.
+    Contract,
 }
 
 impl ScopeTag {

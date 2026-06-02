@@ -291,9 +291,9 @@ pub trait CircuitInfo<'info>: Copy {
     type TypeSystem: TypeSystem;
 
     /// Looks up a contract target definition by name.
-    fn find_contract_target(
+    fn find_contract_target<M>(
         &self,
-        name: &Identifier,
+        name: &Identifier<M>,
     ) -> Result<impl ContractTargetInfo<'info, TypeSystem = Self::TypeSystem>, Self::Error>;
 }
 
@@ -354,6 +354,10 @@ impl<'ctx, T> InputInfo<'ctx, T> {
     pub fn unnamed(r#type: T) -> Self {
         Self { name: None, r#type }
     }
+
+    pub fn name(&self) -> Option<&'ctx str> {
+        self.name
+    }
 }
 
 /// Information about a contract target's output.
@@ -375,6 +379,10 @@ impl<'ctx, T> OutputInfo<'ctx, T> {
     pub fn unnamed(r#type: T) -> Self {
         Self { name: None, r#type }
     }
+
+    pub fn name(&self) -> Option<&'ctx str> {
+        self.name
+    }
 }
 
 /// Information about a contract target's member.
@@ -393,6 +401,14 @@ impl<'ctx, T> MemberInfo<'ctx, T> {
             public,
         }
     }
+
+    pub fn r#type(&self) -> &T {
+        &self.r#type
+    }
+
+    pub fn name(&self) -> &'ctx str {
+        self.name
+    }
 }
 
 /// Information about a template parameter.
@@ -409,6 +425,14 @@ impl<'ctx, T> ParamInfo<'ctx, T> {
     /// Creates a new info struct.
     pub fn new(name: &'ctx str, r#type: Option<T>) -> Self {
         Self { name, r#type }
+    }
+
+    pub fn r#type(&self) -> Option<&T> {
+        self.r#type.as_ref()
+    }
+
+    pub fn name(&self) -> &'ctx str {
+        self.name
     }
 }
 

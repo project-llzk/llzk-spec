@@ -1,26 +1,39 @@
 //! Helper methods for emitting IR.
 
+use std::borrow::Cow;
+
 use ::melior::ir::Block;
 use llzk::{
     builder::OpBuilder,
-    dialect::{function, poly::unifiable_cast},
+    dialect::{function, poly::unifiable_cast, r#struct, verif},
     prelude::{
-        FlatSymbolRefAttribute, FuncDefOp, FuncDefOpLike as _, FuncDefOpRef, FunctionType,
-        LlzkContext, OperationLike as _, StringAttribute, melior_dialects::scf,
+        ContractOpLike, ContractOpRef, FlatSymbolRefAttribute, FuncDefOp, FuncDefOpLike as _,
+        FuncDefOpRef, FunctionType, LlzkContext, OperationLike as _, StringAttribute,
+        StructDefOpRef, SymbolRefAttribute, melior_dialects::scf,
     },
 };
 use melior::ir::{
-    BlockLike as _, BlockRef, Location, Region, RegionLike as _, Type, Value, ValueLike,
+    BlockLike as _, BlockRef, Identifier, Location, Module, Operation, OperationRef, Region,
+    RegionLike as _, Type, Value, ValueLike, operation::OperationBuilder,
 };
 
 use crate::{
-    ast::{Span, Spanned as _, Visitable, Visitor},
+    ast::{self, Span, Spanned, Visitable, Visitor},
     diagnostic::CompileError,
-    ir::verif::{
-        SpecCodegen, TypedExpression, TypedIdentifier, TypedPredicateDecl,
-        scope::{CodegenScope, ScopeData, ScopeTag},
+    ir::{
+        llzk::LlzkContractTarget,
+        verif::{
+            SpecCodegen, TypedContractDecl, TypedExpression, TypedIdentifier, TypedPredicateDecl,
+            scope::{CodegenScope, ScopeData, ScopeTag},
+        },
     },
+    type_analysis::{CircuitInfo as _, ContractTargetInfo as _},
 };
+
+/// 'sym_name' attribute name.
+pub const SYM_NAME_ATTR: &str = "sym_name";
+/// 'path' attribute name.
+const PATH_ATTR: &str = "path";
 
 impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
     /// Pushes a block where to emit the body of a predicate.
@@ -255,6 +268,39 @@ impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
     {
         entities.iter().map(|e| e.accept(self)).collect()
     }
+
+    /// Creates the correct symbol for the given identifier.
+    pub fn symbolize_target(&self, name: &TypedIdentifier<'ast, 'ctx>) -> SymbolRefAttribute<'ctx> {
+        let parts: Vec<_> = name.value().split("::").collect();
+        SymbolRefAttribute::new_from_str(self.context(), parts[0], &parts[1..])
+    }
+
+    /// Creates a contract name for an anonymous contract targeting the given symbol.
+    pub fn anon_contract_name(&mut self, name: SymbolRefAttribute<'ctx>) -> StringAttribute<'ctx> {
+        let id = format!("contract${}", self.anon_contracts);
+        self.anon_contracts += 1;
+        let nested = name.nested();
+        let mut buf = String::with_capacity(
+            name.root().to_raw().length
+                + id.len()
+                + nested.iter().map(|n| n.value().len()).sum::<usize>()
+                + (nested.len() + 2),
+        );
+        buf.push_str(name.root().as_str().unwrap());
+        buf.push('$');
+        for part in nested {
+            buf.push_str(part.value());
+            buf.push('$');
+        }
+        buf.push_str(&id);
+
+        StringAttribute::new(self.context(), &buf)
+    }
+
+    /// Creates an AST identifier.
+    pub fn create_ident(&self, symbol: &str, spanned: &dyn Spanned) -> ast::Identifier<'ast> {
+        ast::Identifier::new(self.ast.symbol(symbol), spanned.span())
+    }
 }
 
 /// Visits an entity inside a fresh scope.
@@ -283,4 +329,61 @@ fn func_type_inputs<'ctx>(func_type: FunctionType<'ctx>) -> Result<Vec<Type<'ctx
     (0..(func_type.input_count()))
         .map(|n| func_type.input(n))
         .collect()
+}
+
+pub fn find_contract_target_on_module<'ctx, 'blk>(
+    module: &'blk Module<'ctx>,
+    sym: SymbolRefAttribute<'ctx>,
+) -> Result<LlzkContractTarget<'ctx, 'blk>, CompileError> {
+    fn children<'ctx, 'blk>(
+        op: &OperationRef<'ctx, 'blk>,
+    ) -> impl Iterator<Item = OperationRef<'ctx, 'blk>> {
+        op.regions()
+            .flat_map(|r| std::iter::successors(r.first_block(), |b| b.next_in_region()))
+            .flat_map(|b| std::iter::successors(b.first_operation(), |o| o.next_in_block()))
+    }
+
+    fn find_contract_impl<'ctx, 'blk>(
+        parent: OperationRef<'ctx, 'blk>,
+        head: &str,
+        tail: &[&str],
+    ) -> Result<OperationRef<'ctx, 'blk>, CompileError> {
+        let head_op = children(&parent)
+            .find_map(|o| {
+                let sym_name = StringAttribute::try_from(o.attribute("sym_name").ok()?)
+                    .expect("'sym_name' to be a StringAttr");
+                (sym_name.value() == head).then_some(o)
+            })
+            .ok_or_else(|| {
+                CompileError::Ir(format!("symbol '{head}' not found in operation {parent}"))
+            })?;
+
+        if tail.is_empty() {
+            Ok(head_op)
+        } else {
+            find_contract_impl(head_op, tail[0], &tail[1..])
+        }
+    }
+
+    let op = find_contract_impl(
+        module.as_operation(),
+        sym.root().as_str()?,
+        &sym.nested()
+            .into_iter()
+            .map(|s| s.value())
+            .collect::<Vec<_>>(),
+    )?;
+
+    if let Ok(struct_op) = StructDefOpRef::try_from(op) {
+        Ok(LlzkContractTarget::Struct(struct_op))
+    } else if let Ok(func_op) = FuncDefOpRef::try_from(op) {
+        Ok(LlzkContractTarget::Function(func_op))
+    } else {
+        let name = op.name();
+
+        Err(CompileError::Ir(format!(
+            "operation was expected to be either 'struct.def' or 'function.def' but is '{}'",
+            name.as_string_ref().as_str().unwrap_or("<unknown>")
+        )))
+    }
 }

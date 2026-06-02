@@ -7,12 +7,12 @@ use std::slice;
 
 use llzk::{
     builder::OpBuilder,
-    dialect::{bool, felt, function, llzk::nondet},
+    dialect::{bool, felt, function, llzk::nondet, poly, r#struct},
     prelude::*,
 };
 use melior::{
     dialect::{arith, scf},
-    ir::Module,
+    ir::{Identifier, Module},
 };
 
 use crate::{
@@ -20,9 +20,9 @@ use crate::{
     diagnostic::CompileError,
     ir::{
         Context, MlirTypeSystem,
-        llzk::LlzkInfo,
+        llzk::{LlzkContractTarget, LlzkInfo},
         verif::{
-            helpers::accept_in_new_scope,
+            helpers::{SYM_NAME_ATTR, accept_in_new_scope, find_contract_target_on_module},
             scope::{CodegenScopeStack, ScopeData, ScopeTag},
         },
     },
@@ -49,32 +49,34 @@ type TypedExpression<'ast, 'ctx> = ast::Expression<'ast, Type<'ctx>>;
 /// Typed AST identifier.
 type TypedIdentifier<'ast, 'ctx> = ast::Identifier<'ast, Type<'ctx>>;
 
+/// Name given to the circuit's module.
+const CIRCUIT_MOD: &str = "$circuit";
+
 /// Generates IR for the given [`Document`] on a fresh module.
-pub fn emit_on_empty_module<'ctx, 'ast>(
+pub fn emit_on_module<'ctx, 'ast>(
     ctx: &'ctx Context,
     ast: &'ast AstContext,
     filename: &str,
     document: &ast::Document<'ast>,
     circuit: &'ctx Module,
-) -> Result<Module<'ctx>, CompileError> {
-    let typed_document = TypeChecker::check(
-        MlirTypeSystem::new(ctx),
-        &LlzkInfo::new(circuit),
-        ast,
-        filename,
-        document,
-    )?;
-    let module = ctx.fresh_module(filename, document.span());
-    SpecCodegen::new(ctx, &module, filename.to_owned()).emit_ir(&typed_document)?;
-    Ok(module)
+) -> Result<(), CompileError> {
+    let info = LlzkInfo::new(circuit);
+    let typed_document =
+        TypeChecker::check(MlirTypeSystem::new(ctx), &info, ast, filename, document)?;
+    SpecCodegen::new(ctx, ast, circuit, filename.to_owned()).emit_ir(&typed_document)
 }
 
 /// Code generator of specifications.
 struct SpecCodegen<'ast, 'ctx, 'blk> {
     ctx: &'ctx Context,
+    ast: &'ast AstContext,
     scope: CodegenScopeStack<'ast, 'ctx, 'blk>,
     filename: String,
     builder: OpBuilder<'ctx>,
+    /// Number of anonymous contracts encountered so far.
+    anon_contracts: u32,
+    /// Reference to the module.
+    module: &'blk Module<'ctx>,
 }
 
 impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk>
@@ -82,12 +84,20 @@ where
     'blk: 'ctx,
 {
     /// Creates a new code generator.
-    fn new(ctx: &'ctx Context, module: &'blk Module<'ctx>, filename: String) -> Self {
+    fn new(
+        ctx: &'ctx Context,
+        ast: &'ast AstContext,
+        module: &'blk Module<'ctx>,
+        filename: String,
+    ) -> Self {
         Self {
             ctx,
+            ast,
             scope: CodegenScopeStack::new(ScopeData::root(module)),
             filename,
             builder: OpBuilder::new(&ctx.context),
+            anon_contracts: 0,
+            module,
         }
     }
 
@@ -122,8 +132,214 @@ impl<'ast, 'ctx> ast::Visitor<TypedItem<'ast, 'ctx>> for SpecCodegen<'ast, 'ctx,
 impl<'ast, 'ctx> ast::Visitor<TypedContractDecl<'ast, 'ctx>> for SpecCodegen<'ast, 'ctx, '_> {
     type Output = Result<(), CompileError>;
 
-    fn visit(&mut self, _: &TypedContractDecl<'ast, 'ctx>) -> Self::Output {
-        todo!("lowering contracts it not currently supported")
+    fn visit(&mut self, decl: &TypedContractDecl<'ast, 'ctx>) -> Self::Output {
+        let location = self.location(decl.span());
+        let sym = self.symbolize_target(decl.target());
+        let name = self.anon_contract_name(sym);
+        let target = find_contract_target_on_module(self.module, sym)?;
+        let parent_op = target.parent_operation().ok_or_else(|| {
+            CompileError::Ir(format!(
+                "expected target '{target}' to be contained in another operation"
+            ))
+        })?;
+        let parent_block = target.block().ok_or_else(|| {
+            CompileError::Ir(format!(
+                "expected target '{target}' to be contained in a block"
+            ))
+        })?;
+
+        // Push into the parent block, this is where we will insert the contract op.
+        self.push(parent_block);
+        {
+            // Create a function def op pretending to be the contract for now.
+            // We will replace this with `verif.contract` once the constructor is fixed.
+            let block_args = {
+                let t = match target {
+                    LlzkContractTarget::Struct(op_ref) => op_ref.constrain_func().unwrap(),
+                    LlzkContractTarget::Function(op_ref) => op_ref,
+                }
+                .function_type()?;
+                t.inputs()
+                    .chain(t.results())
+                    .map(|t| (t, location))
+                    .collect::<Vec<_>>()
+            };
+            let arg_attrs = {
+                let (func_op, mut arg_attrs) = match target {
+                    LlzkContractTarget::Struct(op_ref) => {
+                        // Return the initial vector with an empty padding for the self argument.
+                        (op_ref.compute_func().unwrap(), vec![vec![]])
+                    }
+                    LlzkContractTarget::Function(op_ref) => (op_ref, vec![]),
+                };
+                arg_attrs.extend(
+                    (0..func_op.function_type().unwrap().input_count()).map(|n| {
+                        Vec::from_iter(
+                            func_op
+                                .argument_attr(n, "function.arg_name")
+                                .map(|a| (Identifier::new(self.context(), "function.arg_name"), a)),
+                        )
+                    }),
+                );
+                arg_attrs
+            };
+            let op = function::def(
+                location,
+                name.value(),
+                (*decl.target().meta())
+                    .try_into()
+                    .map_err(|err| CompileError::Ir(format!("{err}")))?,
+                &[],
+                Some(&arg_attrs),
+            )?;
+            let op_ref = FuncDefOpRef::try_from(self.scope.top().append_operation(op)).unwrap();
+            let block = op_ref.body()?.append_block(Block::new(&block_args));
+            let arg0 = Value::from(block.argument(0)?);
+
+            // Push into the block holding the body of the contract.
+            self.push_tagged(block, ScopeTag::Contract);
+
+            // If we are encapsulated in a `poly.template` op, bind all the template parameters
+            // into the environment.
+            // The bindings are `poly.read_const` read ops from each binding (that has a type).
+            if let Ok(template_op) = TemplateOpRef::try_from(parent_op) {
+                template_op
+                    .const_binding_ops()
+                    .into_iter()
+                    .filter(|param_ops| param_ops.type_opt().is_some())
+                    .try_for_each(|param_op| {
+                        let symbol = param_op.sym_name();
+                        let read_value =
+                            self.scope
+                                .top()
+                                .append_operation_with_result(poly::read_const(
+                                    location,
+                                    symbol,
+                                    param_op.type_opt().unwrap(),
+                                ))?;
+                        let name = self.create_ident(symbol, decl);
+                        self.scope
+                            .top()
+                            .bind_local(&name, read_value)
+                            .map_err(|err| {
+                                err.into_compile_error(
+                                    &self.filename,
+                                    Some(decl.span()),
+                                    format!("while binding template parameter '{symbol}'"),
+                                )
+                            })
+                    })?;
+            }
+
+            match target {
+                LlzkContractTarget::Struct(target_op) => {
+                    // If the target is a struct:
+                    //   Bind the members are `struct.readm` operations reading from argument #0
+                    //   Bind the inputs from the rest of the arguments of the function.
+                    for member in target_op.member_defs() {
+                        let op = r#struct::readm(
+                            self.builder(),
+                            location,
+                            member.member_type(),
+                            arg0,
+                            member.member_name(),
+                        )?;
+                        let value = self.scope.top().append_operation_with_result(op)?;
+                        let name = self.create_ident(member.member_name(), decl);
+                        self.scope.top().bind_local(&name, value).map_err(|err| {
+                            err.into_compile_error(
+                                &self.filename,
+                                Some(decl.span()),
+                                format!("while binding struct member '{}'", member.member_name()),
+                            )
+                        })?;
+                    }
+                    let compute_func = target_op.compute_func().unwrap();
+                    let arg_count = compute_func.function_type()?.input_count();
+                    (0..arg_count).try_for_each(|n| -> Result<(), CompileError> {
+                        let arg = Value::from(block.argument(n + 1)?);
+
+                        let name = match compute_func
+                            .argument_attr(n, "function.arg_name")
+                            .and_then(|a| Ok(StringAttribute::try_from(a)?.value()))
+                            .ok()
+                        {
+                            Some(arg_name) => self.create_ident(arg_name, decl),
+                            None => self.create_ident(&format!("$arg[{n}]"), decl),
+                        };
+
+                        self.scope
+                            .top()
+                            .bind_parameter(&name, arg, n)
+                            .map_err(|err| {
+                                err.into_compile_error(
+                                    &self.filename,
+                                    Some(decl.span()),
+                                    format!("while binding argument #{n} of target"),
+                                )
+                            })
+                    })?;
+                }
+                LlzkContractTarget::Function(target_op) => {
+                    // If the target is a function:
+                    //   Bind the inputs (the first N arguments of the contract)
+                    let function_type = target_op.function_type()?;
+                    let input_count = function_type.input_count();
+                    (0..input_count).try_for_each(|n| -> Result<(), CompileError> {
+                        let arg = Value::from(block.argument(n)?);
+
+                        let name = match target_op
+                            .argument_attr(n, "function.arg_name")
+                            .and_then(|a| Ok(StringAttribute::try_from(a)?.value()))
+                            .ok()
+                        {
+                            Some(arg_name) => self.create_ident(arg_name, decl),
+                            None => self.create_ident(&format!("$arg[{n}]"), decl),
+                        };
+
+                        self.scope
+                            .top()
+                            .bind_parameter(&name, arg, n)
+                            .map_err(|err| {
+                                err.into_compile_error(
+                                    &self.filename,
+                                    Some(decl.span()),
+                                    format!("while binding argument #{n} of target"),
+                                )
+                            })
+                    })?;
+                    //   Bind the outputs (the rest of the arguments of the contract)
+                    let output_count = function_type.result_count();
+                    (0..output_count).try_for_each(|n| -> Result<(), CompileError> {
+                        let arg = Value::from(block.argument(input_count + n)?);
+                        let name = self.create_ident(&format!("$res[{n}]"), decl);
+                        self.scope.top().bind_output(&name, arg, n).map_err(|err| {
+                            err.into_compile_error(
+                                &self.filename,
+                                Some(decl.span()),
+                                format!("while binding outptu #{n} of target"),
+                            )
+                        })
+                    })?;
+                }
+            }
+
+            // TODO: Bind loop information.
+
+            // Emit the IR for the body
+            decl.body().accept(self)?;
+
+            // Add a `function.return` terminator since we are faking the contract op.
+            // We will remove the line below once we are using `verif.contract`
+            self.scope
+                .top()
+                .append_operation(function::r#return(location, &[]));
+
+            // Pop from the block holding the body.
+            self.pop();
+        }
+        self.pop();
+        Ok(())
     }
 }
 
