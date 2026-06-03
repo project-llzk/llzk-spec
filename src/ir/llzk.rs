@@ -48,6 +48,41 @@ impl<'ctx, 'm> LlzkInfo<'ctx, 'm> {
     }
 }
 
+/// Returns true if the given identifier is equivalent to the symbol.
+///
+/// The name must be a fully qualified name with its parts separated by `::`. Each part must be
+/// equal to each part of the symbol.
+fn check_fqn<M>(name: &Identifier<M>, fqn: SymbolRefAttribute) -> bool {
+    let name_parts = name.value().split("::").collect::<Vec<_>>();
+    let Ok(root) = fqn.root().as_str() else {
+        // If the root is not a UTF8 string then we consider it not equal since we expect the identifier to
+        // contain valid unicode.
+        return false;
+    };
+    let fqn_parts = std::iter::once(root)
+        .chain(fqn.nested().into_iter().map(|s| s.value()))
+        .collect::<Vec<_>>();
+
+    name_parts.len() == fqn_parts.len()
+        && std::iter::zip(name_parts, fqn_parts).all(|(lhs, rhs)| lhs == rhs)
+}
+
+/// Attempts to extract an op of the given type if the fqn matches
+macro_rules! extract_target {
+    ($op:ident, $name:expr, $of_ref:ty, $target:ident, $result:ident) => {
+        if let Some($op) = <$of_ref>::from_option_raw($op.to_raw()) {
+            if check_fqn($name, $op.fully_qualified_name()) {
+                $result = Some(LlzkContractTarget::$target($op));
+                return WalkResult::Interrupt;
+            } else {
+                // Don't walk inside the operation since there isn't anything interesting to
+                // look at.
+                return WalkResult::Skip;
+            }
+        }
+    };
+}
+
 impl<'ctx> CircuitInfo<'ctx> for LlzkInfo<'ctx, '_> {
     type Error = error::Error;
 
@@ -61,29 +96,8 @@ impl<'ctx> CircuitInfo<'ctx> for LlzkInfo<'ctx, '_> {
         self.module
             .as_operation()
             .walk(WalkOrder::PreOrder, |operation| {
-                if let Some(struct_op) = StructDefOpRef::from_option_raw(operation.to_raw()) {
-                    let fqn = struct_contract_target_name(&struct_op, struct_op.sym_name());
-                    if fqn == name.value() {
-                        result = Some(LlzkContractTarget::Struct(struct_op));
-                        return WalkResult::Interrupt;
-                    } else {
-                        // Don't walk inside the operation since there isn't anything interesting to
-                        // look at.
-                        return WalkResult::Skip;
-                    }
-                }
-
-                if let Some(func_op) = FuncDefOpRef::from_option_raw(operation.to_raw()) {
-                    let fqn = StringAttribute::try_from(func_op.fully_qualified_name()).unwrap();
-                    if fqn.value() == name.value() {
-                        result = Some(LlzkContractTarget::Function(func_op));
-                        return WalkResult::Interrupt;
-                    } else {
-                        // Don't walk inside the operation since there isn't anything interesting to
-                        // look at.
-                        return WalkResult::Skip;
-                    }
-                }
+                extract_target!(operation, name, StructDefOpRef, Struct, result);
+                extract_target!(operation, name, FuncDefOpRef, Function, result);
 
                 WalkResult::Advance
             });

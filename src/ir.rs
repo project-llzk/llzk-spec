@@ -51,7 +51,7 @@ impl Context {
     /// Creates an empty MLIR module.
     #[inline]
     pub fn fresh_module<'ctx>(&'ctx self, filename: &str, span: Span) -> Module<'ctx> {
-        llzk_module(self.location_from_span(filename, span))
+        llzk_module(self.location_from_span(filename, span), None)
     }
 
     /// Loads a MLIR module from the given string.
