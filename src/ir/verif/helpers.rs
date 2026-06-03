@@ -1,20 +1,18 @@
 //! Helper methods for emitting IR.
 
-use std::borrow::Cow;
-
 use ::melior::ir::Block;
 use llzk::{
     builder::OpBuilder,
-    dialect::{function, poly::unifiable_cast, r#struct, verif},
+    dialect::{function, poly::unifiable_cast},
     prelude::{
-        ContractOpLike, ContractOpRef, FlatSymbolRefAttribute, FuncDefOp, FuncDefOpLike as _,
-        FuncDefOpRef, FunctionType, LlzkContext, OperationLike as _, StringAttribute,
-        StructDefOpRef, SymbolRefAttribute, melior_dialects::scf,
+        FlatSymbolRefAttribute, FuncDefOp, FuncDefOpLike as _, FuncDefOpRef, FunctionType,
+        LlzkContext, OperationLike as _, StringAttribute, StructDefOpRef, SymbolRefAttribute,
+        melior_dialects::scf,
     },
 };
 use melior::ir::{
-    BlockLike as _, BlockRef, Identifier, Location, Module, Operation, OperationRef, Region,
-    RegionLike as _, Type, Value, ValueLike, operation::OperationBuilder,
+    BlockLike as _, BlockRef, Location, Module, OperationRef, Region, RegionLike as _, Type, Value,
+    ValueLike,
 };
 
 use crate::{
@@ -23,17 +21,11 @@ use crate::{
     ir::{
         llzk::LlzkContractTarget,
         verif::{
-            SpecCodegen, TypedContractDecl, TypedExpression, TypedIdentifier, TypedPredicateDecl,
+            SpecCodegen, TypedExpression, TypedIdentifier, TypedPredicateDecl,
             scope::{CodegenScope, ScopeData, ScopeTag},
         },
     },
-    type_analysis::{CircuitInfo as _, ContractTargetInfo as _},
 };
-
-/// 'sym_name' attribute name.
-pub const SYM_NAME_ATTR: &str = "sym_name";
-/// 'path' attribute name.
-const PATH_ATTR: &str = "path";
 
 impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
     /// Pushes a block where to emit the body of a predicate.

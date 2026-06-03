@@ -540,6 +540,7 @@ dependencies = [
  "glob",
  "internment",
  "llzk",
+ "llzk-sys",
  "melior",
  "mlir-sys",
  "num-bigint",

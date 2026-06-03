@@ -22,7 +22,7 @@ use llzk::prelude::{
     FuncDefOpRef, FuncDefOpRefMut, PodType, StructDefOpRef, SymbolRefAttribute, TemplateOpLike,
     TemplateOpRef, TemplateSymbolBindingOpLike as _,
 };
-use melior::ir::{BlockLike, RegionLike, TypeLike as _, ValueLike};
+use melior::ir::{Attribute, BlockLike, RegionLike, TypeLike as _, ValueLike};
 use melior::ir::{
     Module, OperationRef, Type,
     attribute::FlatSymbolRefAttribute,
@@ -258,10 +258,25 @@ impl<'ctx> ContractTargetInfo<'ctx> for LlzkContractTarget<'ctx, '_> {
 
     fn self_type(&self) -> Option<Type<'ctx>> {
         match self {
-            Self::Struct(op) => Some(op.r#type().into()),
+            Self::Struct(op) => Some(fix_struct_type(op.r#type()).into()),
             Self::Function(_) => None,
         }
     }
+}
+
+/// Convert `!struct.type<@Foo>` into `!struct.type<@Foo<[]>>`.
+fn fix_struct_type<'ctx>(s: StructType<'ctx>) -> StructType<'ctx> {
+    // If a struct type is `!struct.type<@Foo>` then calling `StructType::params` causes a
+    // segfault because the params attribute is null.
+    //
+    // Is either a bug in `llzk-lib` or `llzk-rs`. Probably the former.
+    unsafe {
+        llzk_sys::llzkStruct_StructTypeGetParams(s.to_raw())
+            .ptr
+            .is_null()
+    }
+    .then(|| StructType::new(s.name(), &[]))
+    .unwrap_or(s)
 }
 
 /// Kind of loop operation discovered in LLZK IR.

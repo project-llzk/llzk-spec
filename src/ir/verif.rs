@@ -22,7 +22,7 @@ use crate::{
         Context, MlirTypeSystem,
         llzk::{LlzkContractTarget, LlzkInfo},
         verif::{
-            helpers::{SYM_NAME_ATTR, accept_in_new_scope, find_contract_target_on_module},
+            helpers::{accept_in_new_scope, find_contract_target_on_module},
             scope::{CodegenScopeStack, ScopeData, ScopeTag},
         },
     },
@@ -48,9 +48,6 @@ type TypedStatement<'ast, 'ctx> = ast::Statement<'ast, Type<'ctx>>;
 type TypedExpression<'ast, 'ctx> = ast::Expression<'ast, Type<'ctx>>;
 /// Typed AST identifier.
 type TypedIdentifier<'ast, 'ctx> = ast::Identifier<'ast, Type<'ctx>>;
-
-/// Name given to the circuit's module.
-const CIRCUIT_MOD: &str = "$circuit";
 
 /// Generates IR for the given [`Document`] on a fresh module.
 pub fn emit_on_module<'ctx, 'ast>(
@@ -441,7 +438,10 @@ impl<'ast, 'ctx> ast::Visitor<TypedStatement<'ast, 'ctx>> for SpecCodegen<'ast, 
             },
             Invariant(_) => match self.closest_tag() {
                 ScopeTag::Predicate => stmt_not_allowed!("invariant", "predicates"),
-                _ => todo!("invariant statement is not supported yet"),
+                _ => {
+                    eprintln!("invariant statement is not supported yet");
+                    Ok(())
+                }
             },
             Predicate(decl) => decl.accept(self),
             Empty { .. } => Ok(()),
