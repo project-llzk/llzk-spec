@@ -3,11 +3,11 @@
 //! Only emitting IR to a separate file is currently supported. In the future we want to support
 //! emitting IR inlined with an existing LLZK module.
 
-use std::slice;
+use std::{any::Any, slice};
 
 use llzk::{
     builder::OpBuilder,
-    dialect::{bool, felt, function, llzk::nondet, poly, r#struct, verif},
+    dialect::{array, bool, felt, function, llzk::nondet, pod, poly, r#struct, verif},
     prelude::*,
 };
 use melior::{
@@ -422,8 +422,62 @@ impl<'ast, 'ctx, 'blk> ast::Visitor<TypedExpression<'ast, 'ctx>> for SpecCodegen
                 assert_eq!(*meta, value.r#type());
                 Ok(value)
             }
-            Index { .. } => todo!("index expression is not supported yet"),
-            Member { .. } => todo!("member expression is not supported yet"),
+            Index {
+                target,
+                index,
+                span,
+                meta,
+            } => {
+                let location = self.location(*span);
+                let target_value = target.accept(self)?;
+                let index_value = index.accept(self)?;
+                let Ok(arr_type) = ArrayType::try_from(target_value.r#type()) else {
+                    return Err(CompileError::Ir(format!(
+                        "expected array type but got {}",
+                        target_value.r#type()
+                    )));
+                };
+                self.top_mut()
+                    .append_operation_with_result(if arr_type.dims().len() > 1 {
+                        array::extract
+                    } else {
+                        array::read
+                    }(
+                        location, *meta, target_value, &[index_value]
+                    ))
+            }
+            Member {
+                target,
+                member,
+                span,
+                meta,
+            } => {
+                let location = self.location(*span);
+                let target_value = target.accept(self)?;
+                if let Ok(_) = StructType::try_from(target_value.r#type()) {
+                    let op = r#struct::readm(
+                        self.builder(),
+                        location,
+                        *meta,
+                        target_value,
+                        member.value(),
+                    )?;
+                    self.top_mut().append_operation_with_result(op)
+                } else if let Ok(_) = PodType::try_from(target_value.r#type()) {
+                    let op = pod::read(
+                        location,
+                        target_value,
+                        FlatSymbolRefAttribute::new(self.context(), member.value()),
+                        *meta,
+                    );
+                    self.top_mut().append_operation_with_result(op)
+                } else {
+                    Err(CompileError::Ir(format!(
+                        "was expecting either a struct or pod type but got {}",
+                        target_value.r#type()
+                    )))
+                }
+            }
             Call {
                 callee, args, meta, ..
             } => {
@@ -439,7 +493,25 @@ impl<'ast, 'ctx, 'blk> ast::Visitor<TypedExpression<'ast, 'ctx>> for SpecCodegen
                 self.top_mut().append_operation_with_result(op)
             }
             Quantifier { .. } => todo!("quantifier expression is not supported yet"),
-            Len { .. } => todo!("len expression is not supported yet"),
+            Len { target, span, .. } => {
+                let target_value = target.accept(self)?;
+                let location = self.location(*span);
+
+                let Ok(_) = ArrayType::try_from(target_value.r#type()) else {
+                    return Err(CompileError::Ir(format!(
+                        "expected array type but got {}",
+                        target_value.r#type()
+                    )));
+                };
+                let op = arith::constant(
+                    self.context(),
+                    IntegerAttribute::new(self.ctx.index_type(), 0).into(),
+                    location,
+                );
+                let dim = self.top_mut().append_operation_with_result(op)?;
+                let op = array::len(location, target_value, dim);
+                self.top_mut().append_operation_with_result(op)
+            }
             Old { .. } => todo!("old expression is not supported yet"),
             Arg { index, span, .. } => self.scope.find_parameter(index).copied().map_err(|err| {
                 err.into_compile_error(&self.filename, Some(*span), format!("on argument #{index}"))
