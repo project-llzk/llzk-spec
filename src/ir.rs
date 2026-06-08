@@ -79,6 +79,11 @@ impl Context {
         IntegerType::new(self.context(), 1).into()
     }
 
+    /// Returns a type representing a machine word.
+    pub fn index_type(&self) -> Type<'_> {
+        Type::index(self.context())
+    }
+
     /// Returns a type representing a finite field element.
     pub fn felt_type(&self) -> Type<'_> {
         match self.prime() {

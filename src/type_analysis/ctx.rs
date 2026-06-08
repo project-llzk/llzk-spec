@@ -4,7 +4,7 @@ use crate::{
     ast::{AstContext, Symbol},
     type_analysis::{
         ArrayTypeProperties, FnTypeProperties, StructTypeProperties as _, TypeProperties,
-        TypeSystem, error::TypeAnalysisError, scope::ScopeStack,
+        TypeSystem, error::TypeAnalysisError, loops::LoopInfo, scope::ScopeStack,
     },
 };
 
@@ -14,7 +14,7 @@ pub(super) type Subst<T> =
 
 /// Shared type inference context used during type-checking.
 pub(super) struct TypeInferenceCtx<'ast, T: TypeSystem> {
-    scope: ScopeStack<'ast, T::Type, T::FnType>,
+    scope: ScopeStack<'ast, T::Type, T::FnType, LoopInfo<T::Type>>,
     constraints: Vec<Constraint<'ast, T::Type>>,
     ts: T,
     ast: &'ast AstContext,
@@ -39,7 +39,7 @@ impl<'ast, T: TypeSystem> TypeInferenceCtx<'ast, T> {
     }
 
     /// Returns a mutable reference to the scopes stack.
-    pub fn scope(&mut self) -> &mut ScopeStack<'ast, T::Type, T::FnType> {
+    pub fn scope(&mut self) -> &mut ScopeStack<'ast, T::Type, T::FnType, LoopInfo<T::Type>> {
         &mut self.scope
     }
 

@@ -1,10 +1,14 @@
 //! Lexical scopes handling.
 
-use llzk::prelude::{FuncDefOpRef, OperationLike as _};
+use llzk::{
+    builder::InsertPoint,
+    prelude::{FuncDefOpRef, OperationLike as _},
+};
 use melior::ir::{BlockLike as _, BlockRef, Module, Operation, OperationRef, Value};
 
 use crate::{
     diagnostic::CompileError,
+    ir::llzk::LlzkLoopTarget,
     type_analysis::scope::{Scope, ScopeStack},
 };
 
@@ -17,12 +21,26 @@ pub enum ScopeTag {
     Predicate,
     /// Tag for contract scopes.
     Contract,
+    /// Tag for compute scopes.
+    Compute,
+    /// Tag for constrain scopes.
+    Constrain,
 }
 
 impl ScopeTag {
     /// Returns whether the tagged scope can append `function.def` operations.
     pub fn accepts_function_def_ops(self) -> bool {
         matches!(self, ScopeTag::Root)
+    }
+
+    /// Returns whether the tagged scope accepts condition statements for the compute function.
+    pub fn compute_condition_scope(self) -> bool {
+        !matches!(self, ScopeTag::Constrain)
+    }
+
+    /// Returns whether the tagged scope accepts condition statements for the constrain function.
+    pub fn constrain_condition_scope(self) -> bool {
+        !matches!(self, ScopeTag::Compute)
     }
 }
 
@@ -31,6 +49,8 @@ impl ScopeTag {
 pub(super) struct ScopeData<'ctx, 'blk> {
     /// Current insertion block.
     block: BlockRef<'ctx, 'blk>,
+    /// Saved insert point.
+    previous: Option<InsertPoint<'ctx, 'blk>>,
     /// Optional tag.
     tag: Option<ScopeTag>,
 }
@@ -43,32 +63,63 @@ impl<'ctx, 'blk> ScopeData<'ctx, 'blk> {
     where
         'blk: 'ctx,
     {
-        Self::new_with_tag(module.body(), ScopeTag::Root)
+        Self {
+            block: module.body(),
+            tag: Some(ScopeTag::Root),
+            previous: None,
+        }
     }
 
     /// Creates an untagged scope.
-    pub fn new(block: BlockRef<'ctx, 'blk>) -> Self {
-        Self { block, tag: None }
+    pub fn new(block: BlockRef<'ctx, 'blk>, previous: InsertPoint<'ctx, 'blk>) -> Self {
+        Self {
+            block,
+            tag: None,
+            previous: Some(previous),
+        }
     }
 
     /// Creates a tagged scope.
-    pub fn new_with_tag(block: BlockRef<'ctx, 'blk>, tag: ScopeTag) -> Self {
+    pub fn new_with_tag(
+        block: BlockRef<'ctx, 'blk>,
+        previous: InsertPoint<'ctx, 'blk>,
+        tag: ScopeTag,
+    ) -> Self {
         Self {
             block,
             tag: Some(tag),
+            previous: Some(previous),
         }
+    }
+
+    pub fn block(&self) -> BlockRef<'ctx, 'blk> {
+        self.block
+    }
+
+    pub fn previous(&self) -> Option<InsertPoint<'ctx, 'blk>> {
+        self.previous
     }
 }
 
 /// Stack of scopes predefined with the types used for emitting IR.
-pub type CodegenScopeStack<'ast, 'ctx, 'blk> =
-    ScopeStack<'ast, Value<'ctx, 'blk>, FuncDefOpRef<'ctx, 'blk>, ScopeData<'ctx, 'blk>>;
+pub type CodegenScopeStack<'ast, 'ctx, 'blk> = ScopeStack<
+    'ast,
+    Value<'ctx, 'blk>,
+    FuncDefOpRef<'ctx, 'blk>,
+    LlzkLoopTarget<'ctx, 'blk>,
+    ScopeData<'ctx, 'blk>,
+>;
 /// Scope predefined with the types used for emitting IR.
 ///
 /// Has some extra methods that make sense to have in this kind of scope but not on the generic
 /// scope type.
-pub type CodegenScope<'ast, 'ctx, 'blk> =
-    Scope<'ast, Value<'ctx, 'blk>, FuncDefOpRef<'ctx, 'blk>, ScopeData<'ctx, 'blk>>;
+pub type CodegenScope<'ast, 'ctx, 'blk> = Scope<
+    'ast,
+    Value<'ctx, 'blk>,
+    FuncDefOpRef<'ctx, 'blk>,
+    LlzkLoopTarget<'ctx, 'blk>,
+    ScopeData<'ctx, 'blk>,
+>;
 
 impl<'ast, 'ctx, 'blk> CodegenScope<'ast, 'ctx, 'blk> {
     /// Appends the operation into the block.

@@ -2,17 +2,22 @@
 
 use ::melior::ir::Block;
 use llzk::{
-    builder::OpBuilder,
-    dialect::{function, poly::unifiable_cast},
+    builder::{OpBuilder, OpBuilderLike},
+    dialect::{
+        function,
+        poly::{self, unifiable_cast},
+        r#struct,
+    },
     prelude::{
         FlatSymbolRefAttribute, FuncDefOp, FuncDefOpLike as _, FuncDefOpRef, FunctionType,
-        LlzkContext, OperationLike as _, StringAttribute, StructDefOpRef, SymbolRefAttribute,
-        melior_dialects::scf,
+        LlzkContext, MemberDefOpLike as _, OperationLike as _, StringAttribute,
+        StructDefOpLike as _, StructDefOpRef, SymbolRefAttribute, TemplateOpLike as _,
+        TemplateOpRef, TemplateSymbolBindingOpLike as _, melior_dialects::scf,
     },
 };
 use melior::ir::{
-    BlockLike as _, BlockRef, Location, Module, OperationRef, Region, RegionLike as _, Type, Value,
-    ValueLike,
+    BlockLike as _, BlockRef, Location, Module, Operation, OperationRef, Region, RegionLike as _,
+    Type, Value, ValueLike, operation::OperationBuilder,
 };
 
 use crate::{
@@ -98,7 +103,7 @@ impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
     }
 
     /// Returns a reference to an [`OpBuilder`].
-    pub fn builder(&self) -> &OpBuilder<'ctx> {
+    pub fn builder(&self) -> &OpBuilder<'ctx, 'ctx> {
         &self.builder
     }
 
@@ -114,21 +119,35 @@ impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
 
     /// Pushes a new, untagged, scope.
     ///
+    /// Sets the insertion point of the builder to the given block.
+    ///
     /// For pushing tagged scopes see [`Self::push_tagged`].
     pub fn push(&mut self, block: BlockRef<'ctx, 'blk>) {
-        self.scope.push(ScopeData::new(block))
+        let previous = self.builder().save_insertion_point();
+        self.scope.push(ScopeData::new(block, previous));
+        self.builder().set_insertion_point_at_end(block);
     }
 
     /// Pushes a new tagged scope.
     ///
+    /// Sets the insertion point of the builder to the given block.
+    ///
     /// For pushing without a tag see [`Self::push`].
     pub fn push_tagged(&mut self, block: BlockRef<'ctx, 'blk>, tag: ScopeTag) {
-        self.scope.push(ScopeData::new_with_tag(block, tag))
+        let previous = self.builder().save_insertion_point();
+        self.scope
+            .push(ScopeData::new_with_tag(block, previous, tag));
+        self.builder().set_insertion_point_at_end(block);
     }
 
     /// Pops the top of the scope stack.
+    ///
+    /// Sets the insertion point of the builder to the end of the block on the new top.
     pub fn pop(&mut self) {
         self.scope.pop();
+        if let Some(previous) = self.scope.top().payload().previous() {
+            self.builder().restore_insertion_point(previous);
+        }
     }
 
     /// Returns the tag closest to the top of the stack.
@@ -217,20 +236,26 @@ impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
         location: Location<'ctx>,
         expected_type: Type<'ctx>,
     ) -> Result<Value<'ctx, 'blk>, CompileError> {
-        accept_in_new_scope(region, self, expr, |mut result, scope: &mut Self| {
-            if result.r#type() != expected_type {
-                result = scope
-                    .top_mut()
-                    .append_operation_with_result(unifiable_cast(
-                        location,
-                        result,
-                        expected_type,
-                    ))?;
-            }
-            let op = scf::r#yield(&[result], location);
-            scope.top_mut().append_operation(op);
-            Ok(result)
-        })
+        accept_in_new_scope(
+            region,
+            self,
+            expr,
+            |mut result, scope: &mut Self| {
+                if result.r#type() != expected_type {
+                    result = scope
+                        .top_mut()
+                        .append_operation_with_result(unifiable_cast(
+                            location,
+                            result,
+                            expected_type,
+                        ))?;
+                }
+                let op = scf::r#yield(&[result], location);
+                scope.top_mut().append_operation(op);
+                Ok(result)
+            },
+            None,
+        )
     }
 
     /// Looks for the actual name of the predicate bound by the given symbol.
@@ -293,6 +318,168 @@ impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
     pub fn create_ident(&self, symbol: &str, spanned: &dyn Spanned) -> ast::Identifier<'ast> {
         ast::Identifier::new(self.ast.symbol(symbol), spanned.span())
     }
+
+    /// Binds poly expressions and constants within the scope of a template op.
+    ///
+    /// If the `parent` operation is a `poly.template` then it iterates over all the
+    /// `poly.const` and `poly.expr` ops inside it and binds their names to a `poly.read_const`
+    /// operation's result.
+    pub fn bind_template_consts(
+        &mut self,
+        parent_op: OperationRef<'ctx, '_>,
+        span: &dyn Spanned,
+        location: Location<'ctx>,
+    ) -> Result<(), CompileError> {
+        if let Ok(template_op) = TemplateOpRef::try_from(parent_op) {
+            template_op
+                .const_binding_ops()
+                .into_iter()
+                .filter(|param_ops| param_ops.type_opt().is_some())
+                .try_for_each(|param_op| {
+                    let symbol = param_op.sym_name();
+                    let read_value =
+                        self.scope
+                            .top()
+                            .append_operation_with_result(poly::read_const(
+                                location,
+                                symbol,
+                                param_op.type_opt().unwrap(),
+                            ))?;
+                    let name = self.create_ident(symbol, span);
+                    self.scope
+                        .top()
+                        .bind_local(&name, read_value)
+                        .map_err(|err| {
+                            err.into_compile_error(
+                                &self.filename,
+                                Some(span.span()),
+                                format!("while binding template parameter '{symbol}'"),
+                            )
+                        })
+                })?;
+        }
+        Ok(())
+    }
+
+    /// Binds the member definitions of the given `struct.def` op to locals in the scope.
+    ///
+    /// The bound value is the result of a `struct.readm` operation reading the member.
+    pub fn bind_members(
+        &mut self,
+        struct_op: StructDefOpRef<'ctx, 'blk>,
+        location: Location<'ctx>,
+        self_value: Value<'ctx, 'blk>,
+        span: &dyn Spanned,
+    ) -> Result<(), CompileError> {
+        for member in struct_op.member_defs() {
+            let op = r#struct::readm(
+                self.builder(),
+                location,
+                member.member_type(),
+                self_value,
+                member.member_name(),
+            )?;
+            let value = self.scope.top().append_operation_with_result(op)?;
+            let name = self.create_ident(member.member_name(), span);
+            self.scope.top().bind_local(&name, value).map_err(|err| {
+                err.into_compile_error(
+                    &self.filename,
+                    Some(span.span()),
+                    format!("while binding struct member '{}'", member.member_name()),
+                )
+            })?;
+        }
+        Ok(())
+    }
+
+    /// Binds block arguments as parameters in the scope based on the metadata in the given
+    /// reference to a `function.def`.
+    ///
+    /// If given, the block arguments are offset by the `offset` parameter.
+    pub fn bind_inputs(
+        &mut self,
+        func: FuncDefOpRef<'ctx, 'blk>,
+        block: BlockRef<'ctx, 'blk>,
+        offset: Option<usize>,
+        span: &dyn Spanned,
+    ) -> Result<(), CompileError> {
+        let arg_count = func.function_type()?.input_count();
+        (0..arg_count).try_for_each(|n| -> Result<(), CompileError> {
+            let arg = Value::from(block.argument(n + offset.unwrap_or_default())?);
+
+            let name = match func
+                .argument_attr(n, "function.arg_name")
+                .and_then(|a| Ok(StringAttribute::try_from(a)?.value()))
+                .ok()
+            {
+                Some(arg_name) => self.create_ident(arg_name, span),
+                None => self.create_ident(&format!("$arg[{n}]"), span),
+            };
+
+            self.scope
+                .top()
+                .bind_parameter(&name, arg, n)
+                .map_err(|err| {
+                    err.into_compile_error(
+                        &self.filename,
+                        Some(span.span()),
+                        format!("while binding argument #{n} of target"),
+                    )
+                })
+        })
+    }
+
+    /// Binds block arguments as outputs in the scope based on the metadata in the given
+    /// reference to a `function.def`.
+    ///
+    /// If given, the block arguments are offset by the `offset` parameter.
+    pub fn bind_outputs(
+        &mut self,
+        func: FuncDefOpRef<'ctx, 'blk>,
+        block: BlockRef<'ctx, 'blk>,
+        offset: Option<usize>,
+        span: &dyn Spanned,
+    ) -> Result<(), CompileError> {
+        let arg_count = func.function_type()?.input_count();
+        (0..arg_count).try_for_each(|n| -> Result<(), CompileError> {
+            let arg = Value::from(block.argument(n + offset.unwrap_or_default())?);
+
+            let name = self.create_ident(&format!("$res[{n}]"), span);
+
+            self.scope.top().bind_output(&name, arg, n).map_err(|err| {
+                err.into_compile_error(
+                    &self.filename,
+                    Some(span.span()),
+                    format!("while binding outptu #{n} of target"),
+                )
+            })
+        })
+    }
+
+    /// Binds the loop information
+    pub fn bind_loop_info(
+        &mut self,
+        target: LlzkContractTarget<'ctx, 'blk>,
+        span: &dyn Spanned,
+    ) -> Result<(), CompileError> {
+        for loop_target in target.loops() {
+            let name = ast::Identifier::new(
+                self.ast.new_symbol(loop_target.label().to_string()),
+                span.span(),
+            );
+            self.scope
+                .top()
+                .bind_loop(&name, loop_target)
+                .map_err(|err| {
+                    err.into_compile_error(
+                        &self.filename,
+                        Some(span.span()),
+                        format!("while binding loop info for '{}'", name.value()),
+                    )
+                })?;
+        }
+        Ok(())
+    }
 }
 
 /// Visits an entity inside a fresh scope.
@@ -303,13 +490,17 @@ pub fn accept_in_new_scope<'ast, 'ctx, 'blk, V, R>(
     scope: &mut SpecCodegen<'ast, 'ctx, 'blk>,
     target: &V,
     tail_cb: impl FnOnce(R, &mut SpecCodegen<'ast, 'ctx, 'blk>) -> Result<R, CompileError>,
+    tag: Option<ScopeTag>,
 ) -> Result<R, CompileError>
 where
     V: Visitable,
     SpecCodegen<'ast, 'ctx, 'blk>: Visitor<V, Output = Result<R, CompileError>>,
 {
     let block_ref = region.append_block(melior::ir::Block::new(&[]));
-    scope.push(block_ref);
+    match tag {
+        Some(tag) => scope.push_tagged(block_ref, tag),
+        None => scope.push(block_ref),
+    }
     let result = target.accept(scope)?;
     let result = tail_cb(result, scope)?;
     scope.pop();

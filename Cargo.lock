@@ -508,7 +508,7 @@ checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
 [[package]]
 name = "llzk"
 version = "0.4.0"
-source = "git+https://github.com/project-llzk/llzk-rs#0a320c48d96ff2352af598407e476056021e60fe"
+source = "git+https://github.com/project-llzk/llzk-rs?branch=dani%2Fbuilder-improvements#3012e14cda8784d2aeb0aa1777b5e0421f057ed7"
 dependencies = [
  "llzk-macro",
  "llzk-sys",
@@ -523,7 +523,7 @@ dependencies = [
 [[package]]
 name = "llzk-macro"
 version = "0.3.0"
-source = "git+https://github.com/project-llzk/llzk-rs#0a320c48d96ff2352af598407e476056021e60fe"
+source = "git+https://github.com/project-llzk/llzk-rs?branch=dani%2Fbuilder-improvements#3012e14cda8784d2aeb0aa1777b5e0421f057ed7"
 dependencies = [
  "convert_case",
  "proc-macro2",
@@ -556,7 +556,7 @@ dependencies = [
 [[package]]
 name = "llzk-sys"
 version = "20.0.0"
-source = "git+https://github.com/project-llzk/llzk-rs#0a320c48d96ff2352af598407e476056021e60fe"
+source = "git+https://github.com/project-llzk/llzk-rs?branch=dani%2Fbuilder-improvements#3012e14cda8784d2aeb0aa1777b5e0421f057ed7"
 dependencies = [
  "anyhow",
  "llzk-sys-build-support",
@@ -566,7 +566,7 @@ dependencies = [
 [[package]]
 name = "llzk-sys-build-support"
 version = "1.0.1"
-source = "git+https://github.com/project-llzk/llzk-rs#0a320c48d96ff2352af598407e476056021e60fe"
+source = "git+https://github.com/project-llzk/llzk-rs?branch=dani%2Fbuilder-improvements#3012e14cda8784d2aeb0aa1777b5e0421f057ed7"
 dependencies = [
  "anyhow",
  "bindgen 0.71.1",

@@ -11,7 +11,7 @@ pub struct LoopInfo<T> {
     /// Label given to the loop.
     label: LoopLabel,
     /// Bindings the loop defines.
-    bindings: Vec<LoopBinding<T>>,
+    bindings: Vec<(LoopBinding, T)>,
 }
 
 impl<T> LoopInfo<T> {
@@ -19,30 +19,20 @@ impl<T> LoopInfo<T> {
     ///
     /// `args` must be any additional arguments that are passed to the loop.
     ///
-    /// Requires a mutable reference to a type system for creating the types of the
-    /// bindings intrinsic to the loop.
-    pub fn new_for_loop<TS>(
+    /// The binding's content (`T`) for the intrinsic arguments is obtained by calling the factory
+    /// callback for each one.
+    pub fn new_for_loop(
         label: LoopLabel,
-        ts: &mut TS,
+        mut f: impl FnMut(LoopBinding) -> T,
         args: impl IntoIterator<Item = T>,
-    ) -> Self
-    where
-        TS: TypeSystem<Type = T>,
-        T: Clone,
-    {
-        let felt_type = ts.felt_type();
+    ) -> Self {
         use LoopBinding::*;
         Self {
             label,
             bindings: Vec::from_iter(
-                [
-                    Lb(felt_type.clone()),
-                    Iv(felt_type.clone()),
-                    Ub(felt_type.clone()),
-                    Step(felt_type.clone()),
-                ]
-                .into_iter()
-                .chain(args.into_iter().map(Arg)),
+                [(Lb, f(Lb)), (Iv, f(Iv)), (Ub, f(Ub)), (Step, f(Step))]
+                    .into_iter()
+                    .chain(args.into_iter().enumerate().map(|(n, arg)| (Arg(n), arg))),
             ),
         }
     }
@@ -51,12 +41,16 @@ impl<T> LoopInfo<T> {
     pub fn new_while_loop(label: LoopLabel, args: impl IntoIterator<Item = T>) -> Self {
         Self {
             label,
-            bindings: Vec::from_iter(args.into_iter().map(LoopBinding::Arg)),
+            bindings: Vec::from_iter(
+                args.into_iter()
+                    .enumerate()
+                    .map(|(n, arg)| (LoopBinding::Arg(n), arg)),
+            ),
         }
     }
 
     /// Returns the bindings defined by the loop.
-    pub(super) fn bindings(&self) -> &[LoopBinding<T>] {
+    pub(super) fn bindings(&self) -> &[(LoopBinding, T)] {
         &self.bindings
     }
 
@@ -125,28 +119,16 @@ impl std::fmt::Display for LoopLabel {
 /// binding order is lower bound, induction variable, upper bound, step, then iter args.
 /// For `scf.while`, bindings are the loop-carried block arguments in order.
 #[derive(Debug)]
-pub(super) enum LoopBinding<T> {
+pub enum LoopBinding {
     /// Lower bound. Only present in for loops.
-    Lb(T),
+    Lb,
     /// Induction variable.
-    Iv(T),
+    Iv,
     /// Upper bound. Only present in for loops.
-    Ub(T),
+    Ub,
     /// Step. Only present in for loops.
-    Step(T),
+    Step,
     /// Additional arguments. Depending on the type of loop the n-th argument will have a different
     /// physical position in the bindings list.
-    Arg(T),
-}
-
-impl<T> LoopBinding<T> {
-    pub fn r#type(&self) -> &T {
-        match self {
-            LoopBinding::Lb(t)
-            | LoopBinding::Iv(t)
-            | LoopBinding::Ub(t)
-            | LoopBinding::Step(t)
-            | LoopBinding::Arg(t) => t,
-        }
-    }
+    Arg(usize),
 }
