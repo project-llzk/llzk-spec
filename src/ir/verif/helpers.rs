@@ -16,8 +16,8 @@ use llzk::{
     },
 };
 use melior::ir::{
-    BlockLike as _, BlockRef, Location, Module, Operation, OperationRef, Region, RegionLike as _,
-    Type, TypeLike, Value, ValueLike, operation::OperationBuilder,
+    BlockLike as _, BlockRef, Location, Module, OperationRef, Region, RegionLike as _, Type,
+    TypeLike, Value, ValueLike,
 };
 
 use crate::{

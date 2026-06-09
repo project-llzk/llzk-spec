@@ -98,7 +98,7 @@ impl<'ast, T: TypeSystem> TypeInferenceCtx<'ast, T> {
 
     /// Handles unification of a single constraint.
     fn unify_pair(&mut self, lhs: &T::Type, rhs: &T::Type, errs: &mut Vec<TypeAnalysisError>) {
-        if lhs.can_resolve_unification(&rhs) {
+        if lhs.can_resolve_unification(rhs) {
             return;
         }
         let lhs = Self::apply(lhs, &self.subst, &mut self.ts);

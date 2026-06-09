@@ -11,8 +11,6 @@ use crate::type_analysis::loops::{LoopInfo, LoopLabel};
 use crate::type_analysis::{
     CircuitInfo, ContractTargetInfo, InputInfo, MemberInfo, OutputInfo, ParamInfo, TypeSystem,
 };
-use llzk::builder::OpBuilder;
-use llzk::dialect::llzk::nondet;
 use llzk::dialect::{
     array::ArrayType,
     function::{FuncDefOpLike, is_func_def},
@@ -24,7 +22,7 @@ use llzk::prelude::{
     FuncDefOpRef, FuncDefOpRefMut, PodType, StructDefOpRef, SymbolRefAttribute, TemplateOpLike,
     TemplateOpRef, TemplateSymbolBindingOpLike as _,
 };
-use melior::ir::{BlockLike, BlockRef, RegionLike, TypeLike as _, Value, ValueLike};
+use melior::ir::{BlockLike, RegionLike, TypeLike as _, ValueLike};
 use melior::ir::{
     Module, OperationRef, Type,
     attribute::FlatSymbolRefAttribute,
@@ -65,8 +63,7 @@ fn check_fqn<M>(name: &Identifier<M>, fqn: SymbolRefAttribute) -> bool {
         .chain(fqn.nested().into_iter().map(|s| s.value()))
         .collect::<Vec<_>>();
 
-    name_parts.len() == fqn_parts.len()
-        && std::iter::zip(name_parts, fqn_parts).all(|(lhs, rhs)| lhs == rhs)
+    name_parts == fqn_parts
 }
 
 /// Attempts to extract an op of the given type if the fqn matches
@@ -261,10 +258,11 @@ impl<'ctx, 'op> ContractTargetInfo<'ctx> for LlzkContractTarget<'ctx, 'op> {
 
 /// Convert `!struct.type<@Foo>` into `!struct.type<@Foo<[]>>`.
 fn fix_struct_type<'ctx>(s: StructType<'ctx>) -> StructType<'ctx> {
-    s.params()
-        .is_none()
-        .then(|| StructType::new(s.name(), &[]))
-        .unwrap_or(s)
+    if s.params().is_none() {
+        StructType::new(s.name(), &[])
+    } else {
+        s
+    }
 }
 
 /// Reference to a loop.

@@ -1,9 +1,6 @@
 //! Types for working with information about loops defined inside circuits.
 
-use crate::{
-    ast::{AstContext, Symbol},
-    type_analysis::TypeSystem,
-};
+use crate::ast::{AstContext, Symbol};
 
 /// Information about a loop.
 #[derive(Debug)]

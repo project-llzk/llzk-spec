@@ -3,11 +3,11 @@
 //! Only emitting IR to a separate file is currently supported. In the future we want to support
 //! emitting IR inlined with an existing LLZK module.
 
-use std::{any::Any, slice};
+use std::slice;
 
 use llzk::{
     builder::OpBuilder,
-    dialect::{array, bool, felt, function, llzk::nondet, pod, poly, r#struct, verif},
+    dialect::{array, bool, felt, function, llzk::nondet, pod, r#struct, verif},
     prelude::*,
 };
 use melior::{
@@ -20,7 +20,7 @@ use crate::{
     diagnostic::CompileError,
     ir::{
         Context, MlirTypeSystem,
-        llzk::{LlzkContractTarget, LlzkInfo, LoopKind},
+        llzk::{LlzkContractTarget, LlzkInfo},
         verif::{
             helpers::{accept_in_new_scope, find_contract_target_on_module},
             scope::{CodegenScopeStack, ScopeData, ScopeTag},
@@ -526,7 +526,7 @@ impl<'ast, 'ctx, 'blk> ast::Visitor<TypedExpression<'ast, 'ctx>> for SpecCodegen
             } => {
                 let location = self.location(*span);
                 let target_value = target.accept(self)?;
-                if let Ok(_) = StructType::try_from(target_value.r#type()) {
+                if StructType::try_from(target_value.r#type()).is_ok() {
                     let op = r#struct::readm(
                         self.builder(),
                         location,
@@ -535,7 +535,7 @@ impl<'ast, 'ctx, 'blk> ast::Visitor<TypedExpression<'ast, 'ctx>> for SpecCodegen
                         member.value(),
                     )?;
                     self.top_mut().append_operation_with_result(op)
-                } else if let Ok(_) = PodType::try_from(target_value.r#type()) {
+                } else if PodType::try_from(target_value.r#type()).is_ok() {
                     let op = pod::read(
                         location,
                         target_value,

@@ -6,7 +6,6 @@ use crate::{
     ast::{Identifier, Symbol},
     type_analysis::{
         FnTypeProperties, TypeProperties, TypeSystem, ctx::Subst, error::TypeAnalysisError,
-        loops::LoopInfo,
     },
 };
 
@@ -74,7 +73,7 @@ impl<'ast, L, F, I, P> ScopeStack<'ast, L, F, I, P> {
             // Fetch the closest binding
             .find_map(|scope| {
                 let sym = scope.params.get(param_no)?;
-                scope.locals.get(&sym)
+                scope.locals.get(sym)
             })
             .ok_or_else(|| TypeAnalysisError::UnknownLocal(format!("argument #{param_no}")))
     }
@@ -85,7 +84,7 @@ impl<'ast, L, F, I, P> ScopeStack<'ast, L, F, I, P> {
             // Fetch the closest binding
             .find_map(|scope| {
                 let sym = scope.outputs.get(output_no)?;
-                scope.locals.get(&sym)
+                scope.locals.get(sym)
             })
             .ok_or_else(|| TypeAnalysisError::UnknownLocal(format!("output #{output_no}")))
     }
@@ -279,7 +278,7 @@ impl<'ast, L, F, I, P> Scope<'ast, L, F, I, P> {
         if self.locals.contains_key(&name.symbol()) {
             return Err(TypeAnalysisError::DuplicateLocal(name.value().to_owned()));
         }
-        self.locals.insert(name.symbol(), l.into());
+        self.locals.insert(name.symbol(), l);
         Ok(())
     }
 
@@ -293,7 +292,7 @@ impl<'ast, L, F, I, P> Scope<'ast, L, F, I, P> {
         if self.locals.contains_key(&name.symbol()) || self.params.contains_key(&param_no) {
             return Err(TypeAnalysisError::DuplicateLocal(name.value().to_owned()));
         }
-        self.locals.insert(name.symbol(), l.into());
+        self.locals.insert(name.symbol(), l);
         self.params.insert(param_no, name.symbol());
         Ok(())
     }
@@ -308,7 +307,7 @@ impl<'ast, L, F, I, P> Scope<'ast, L, F, I, P> {
         if self.locals.contains_key(&name.symbol()) || self.outputs.contains_key(&output_no) {
             return Err(TypeAnalysisError::DuplicateLocal(name.value().to_owned()));
         }
-        self.locals.insert(name.symbol(), l.into());
+        self.locals.insert(name.symbol(), l);
         self.outputs.insert(output_no, name.symbol());
         Ok(())
     }
