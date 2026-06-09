@@ -58,10 +58,14 @@ pub fn emit_on_module<'ctx, 'ast>(
     filename: &str,
     document: &ast::Document<'ast>,
     circuit: &'ctx Module,
-) -> Result<(), CompileError> {
-    let info = LlzkInfo::new(circuit);
-    let typed_document =
-        TypeChecker::check(MlirTypeSystem::new(ctx), &info, ast, filename, document)?;
+) -> Result<Module<'ctx>, CompileError> {
+    let typed_document = TypeChecker::check(
+        MlirTypeSystem::new(ctx, circuit),
+        &LlzkInfo::new(circuit),
+        ast,
+        filename,
+        document,
+    )?;
     SpecCodegen::new(ctx, ast, circuit, filename.to_owned()).emit_ir(&typed_document)
 }
 

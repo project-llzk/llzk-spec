@@ -85,10 +85,10 @@ macro_rules! extract_target {
     };
 }
 
-impl<'ctx> CircuitInfo<'ctx> for LlzkInfo<'ctx, '_> {
+impl<'ctx, 'm> CircuitInfo<'ctx> for LlzkInfo<'ctx, 'm> {
     type Error = error::Error;
 
-    type TypeSystem = MlirTypeSystem<'ctx>;
+    type TypeSystem = MlirTypeSystem<'ctx, 'm>;
 
     fn find_contract_target<M>(
         &self,
@@ -161,8 +161,8 @@ impl std::fmt::Display for LlzkContractTarget<'_, '_> {
     }
 }
 
-impl<'ctx> ContractTargetInfo<'ctx> for LlzkContractTarget<'ctx, '_> {
-    type TypeSystem = MlirTypeSystem<'ctx>;
+impl<'ctx, 'op> ContractTargetInfo<'ctx> for LlzkContractTarget<'ctx, 'op> {
+    type TypeSystem = MlirTypeSystem<'ctx, 'op>;
 
     fn inputs(&self) -> impl Iterator<Item = InputInfo<'ctx, Type<'ctx>>> {
         let f = match self {

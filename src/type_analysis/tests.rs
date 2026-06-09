@@ -14,6 +14,7 @@ impl TypeSystem for MockTypeSystem {
     type Type = MockType;
     type FnType = MockFnType;
     type ArrayType = MockArrayType;
+    type Scope = ();
 
     fn bool_type(&mut self) -> Self::Type {
         MockType::Bool
@@ -37,6 +38,10 @@ impl TypeSystem for MockTypeSystem {
     }
 
     type StructType = MockStructType;
+
+    fn scope(&mut self) -> &Self::Scope {
+        &()
+    }
 }
 
 /// Identifier for type variables.
@@ -247,16 +252,17 @@ impl ArrayTypeProperties for MockArrayType {
 
 impl StructTypeProperties for MockStructType {
     type Type = MockType;
+    type Scope = ();
 
     fn contains_type_vars(&self) -> bool {
         self.members.values().any(|t| t.contains_type_vars())
     }
 
-    fn get_member(&self, name: &str) -> Option<Self::Type> {
+    fn member(&self, name: &str, _: &Self::Scope) -> Option<Self::Type> {
         self.members.get(name).cloned()
     }
 
-    fn member_types(&self) -> Vec<Self::Type> {
+    fn member_types(&self, _: &Self::Scope) -> Vec<Self::Type> {
         self.members.values().cloned().collect()
     }
 
