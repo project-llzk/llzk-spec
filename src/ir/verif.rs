@@ -51,7 +51,9 @@ type TypedExpression<'ast, 'ctx> = ast::Expression<'ast, Type<'ctx>>;
 /// Typed AST identifier.
 type TypedIdentifier<'ast, 'ctx> = ast::Identifier<'ast, Type<'ctx>>;
 
-/// Generates IR for the given [`Document`] on a fresh module.
+/// Generates IR for the given [`Document`] on the given module.
+///
+/// The module must contain the IR for the circuit the spec is targeting.
 pub fn emit_on_module<'ctx, 'ast>(
     ctx: &'ctx Context,
     ast: &'ast AstContext,
