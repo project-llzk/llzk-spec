@@ -259,6 +259,10 @@ impl<'ast, 'ctx> ast::Visitor<TypedStatement<'ast, 'ctx>> for SpecCodegen<'ast, 
                             ast::Scope::Constrain => ScopeTag::Constrain,
                         }),
                     )?;
+                    let block = region.first_block().unwrap();
+                    if block.terminator().is_none() {
+                        block.append_operation(scf::r#yield(&[], self.location(*span)));
+                    }
                     let op = scf::execute_region(&[], region, self.location(*span));
                     self.top_mut().append_operation(op);
                     Ok(())
@@ -269,6 +273,10 @@ impl<'ast, 'ctx> ast::Visitor<TypedStatement<'ast, 'ctx>> for SpecCodegen<'ast, 
                 // in the scope logic.
                 let region = Region::new();
                 accept_in_new_scope(&region, self, block, |_, _| Ok(()), None)?;
+                let block_ref = region.first_block().unwrap();
+                if block_ref.terminator().is_none() {
+                    block_ref.append_operation(scf::r#yield(&[], self.location(block.span())));
+                }
                 let op = scf::execute_region(&[], region, self.location(block.span()));
                 self.top_mut().append_operation(op);
                 Ok(())
@@ -393,20 +401,72 @@ impl<'ast, 'ctx, 'blk> ast::Visitor<TypedExpression<'ast, 'ctx>> for SpecCodegen
                 let op = match op {
                     Or => bool::or(location, lhs, rhs)?,
                     And => bool::and(location, lhs, rhs)?,
-                    Eq => bool::eq(location, lhs, rhs)?,
-                    Ne => bool::ne(location, lhs, rhs)?,
-                    Lt => bool::lt(location, lhs, rhs)?,
-                    Le => bool::le(location, lhs, rhs)?,
-                    Gt => bool::gt(location, lhs, rhs)?,
-                    Ge => bool::ge(location, lhs, rhs)?,
-                    Add => felt::add(location, lhs, rhs)?,
-                    Sub => felt::sub(location, lhs, rhs)?,
-                    Mul => felt::mul(location, lhs, rhs)?,
-                    Div => felt::div(location, lhs, rhs)?,
+                    Eq => {
+                        let lhs = self.cast_if_necessary(lhs, self.ctx.felt_type(), location)?;
+                        let rhs = self.cast_if_necessary(rhs, self.ctx.felt_type(), location)?;
+                        bool::eq(location, lhs, rhs)?
+                    }
+                    Ne => {
+                        let lhs = self.cast_if_necessary(lhs, self.ctx.felt_type(), location)?;
+                        let rhs = self.cast_if_necessary(rhs, self.ctx.felt_type(), location)?;
+                        bool::ne(location, lhs, rhs)?
+                    }
+                    Lt => {
+                        let lhs = self.cast_if_necessary(lhs, self.ctx.felt_type(), location)?;
+                        let rhs = self.cast_if_necessary(rhs, self.ctx.felt_type(), location)?;
+                        bool::lt(location, lhs, rhs)?
+                    }
+                    Le => {
+                        let lhs = self.cast_if_necessary(lhs, self.ctx.felt_type(), location)?;
+                        let rhs = self.cast_if_necessary(rhs, self.ctx.felt_type(), location)?;
+                        bool::le(location, lhs, rhs)?
+                    }
+                    Gt => {
+                        let lhs = self.cast_if_necessary(lhs, self.ctx.felt_type(), location)?;
+                        let rhs = self.cast_if_necessary(rhs, self.ctx.felt_type(), location)?;
+                        bool::gt(location, lhs, rhs)?
+                    }
+                    Ge => {
+                        let lhs = self.cast_if_necessary(lhs, self.ctx.felt_type(), location)?;
+                        let rhs = self.cast_if_necessary(rhs, self.ctx.felt_type(), location)?;
+                        bool::ge(location, lhs, rhs)?
+                    }
+                    Add => {
+                        let lhs = self.cast_if_necessary(lhs, self.ctx.felt_type(), location)?;
+                        let rhs = self.cast_if_necessary(rhs, self.ctx.felt_type(), location)?;
+                        felt::add(location, lhs, rhs)?
+                    }
+                    Sub => {
+                        let lhs = self.cast_if_necessary(lhs, self.ctx.felt_type(), location)?;
+                        let rhs = self.cast_if_necessary(rhs, self.ctx.felt_type(), location)?;
+                        felt::sub(location, lhs, rhs)?
+                    }
+                    Mul => {
+                        let lhs = self.cast_if_necessary(lhs, self.ctx.felt_type(), location)?;
+                        let rhs = self.cast_if_necessary(rhs, self.ctx.felt_type(), location)?;
+                        felt::mul(location, lhs, rhs)?
+                    }
+                    Div => {
+                        let lhs = self.cast_if_necessary(lhs, self.ctx.felt_type(), location)?;
+                        let rhs = self.cast_if_necessary(rhs, self.ctx.felt_type(), location)?;
+                        felt::div(location, lhs, rhs)?
+                    }
                     // felt.smod or felt.umod?
-                    Mod => felt::umod(location, lhs, rhs)?,
-                    BitAnd => felt::bit_and(location, lhs, rhs)?,
-                    Pow => felt::pow(location, lhs, rhs)?,
+                    Mod => {
+                        let lhs = self.cast_if_necessary(lhs, self.ctx.felt_type(), location)?;
+                        let rhs = self.cast_if_necessary(rhs, self.ctx.felt_type(), location)?;
+                        felt::umod(location, lhs, rhs)?
+                    }
+                    BitAnd => {
+                        let lhs = self.cast_if_necessary(lhs, self.ctx.felt_type(), location)?;
+                        let rhs = self.cast_if_necessary(rhs, self.ctx.felt_type(), location)?;
+                        felt::bit_and(location, lhs, rhs)?
+                    }
+                    Pow => {
+                        let lhs = self.cast_if_necessary(lhs, self.ctx.felt_type(), location)?;
+                        let rhs = self.cast_if_necessary(rhs, self.ctx.felt_type(), location)?;
+                        felt::pow(location, lhs, rhs)?
+                    }
                 };
                 let value = self.top_mut().append_operation_with_result(op)?;
                 assert_eq!(*meta, value.r#type());
@@ -416,7 +476,11 @@ impl<'ast, 'ctx, 'blk> ast::Visitor<TypedExpression<'ast, 'ctx>> for SpecCodegen
                 let value = expr.accept(self)?;
                 let op = match op {
                     Not => bool::not(location, value)?,
-                    Neg => felt::neg(location, value)?,
+                    Neg => {
+                        let value =
+                            self.cast_if_necessary(value, self.ctx.felt_type(), location)?;
+                        felt::neg(location, value)?
+                    }
                 };
                 let value = self.top_mut().append_operation_with_result(op)?;
                 assert_eq!(*meta, value.r#type());
@@ -431,6 +495,8 @@ impl<'ast, 'ctx, 'blk> ast::Visitor<TypedExpression<'ast, 'ctx>> for SpecCodegen
                 let location = self.location(*span);
                 let target_value = target.accept(self)?;
                 let index_value = index.accept(self)?;
+                let index_value =
+                    self.cast_if_necessary(index_value, self.ctx.index_type(), location)?;
                 let Ok(arr_type) = ArrayType::try_from(target_value.r#type()) else {
                     return Err(CompileError::Ir(format!(
                         "expected array type but got {}",

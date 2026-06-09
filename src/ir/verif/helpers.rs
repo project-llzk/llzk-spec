@@ -4,7 +4,7 @@ use ::melior::ir::Block;
 use llzk::{
     builder::{OpBuilder, OpBuilderLike},
     dialect::{
-        function,
+        cast, function,
         poly::{self, unifiable_cast},
         r#struct,
     },
@@ -12,12 +12,12 @@ use llzk::{
         FlatSymbolRefAttribute, FuncDefOp, FuncDefOpLike as _, FuncDefOpRef, FunctionType,
         LlzkContext, MemberDefOpLike as _, OperationLike as _, StringAttribute,
         StructDefOpLike as _, StructDefOpRef, SymbolRefAttribute, TemplateOpLike as _,
-        TemplateOpRef, TemplateSymbolBindingOpLike as _, melior_dialects::scf,
+        TemplateOpRef, TemplateSymbolBindingOpLike as _, is_felt_type, melior_dialects::scf,
     },
 };
 use melior::ir::{
     BlockLike as _, BlockRef, Location, Module, Operation, OperationRef, Region, RegionLike as _,
-    Type, Value, ValueLike, operation::OperationBuilder,
+    Type, TypeLike, Value, ValueLike, operation::OperationBuilder,
 };
 
 use crate::{
@@ -479,6 +479,34 @@ impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
                 })?;
         }
         Ok(())
+    }
+
+    /// Casts the given value to the requested type if they type of the
+    /// value does not match.
+    ///
+    /// Defaults to using `poly.unifiable_cast` with a special case for
+    /// casting between `index` and `!felt.type` and vice versa.
+    pub fn cast_if_necessary(
+        &mut self,
+        value: Value<'ctx, 'blk>,
+        requested: Type<'ctx>,
+        location: Location<'ctx>,
+    ) -> Result<Value<'ctx, 'blk>, CompileError> {
+        if value.r#type() == requested {
+            return Ok(value);
+        }
+
+        let op = if is_felt_type(value.r#type()) && requested.is_index() {
+            // cast felt -> index
+            cast::toindex(location, value)
+        } else if value.r#type().is_index() && is_felt_type(requested) {
+            // cast index -> felt
+            cast::tofelt(location, value, Some(requested.try_into()?))
+        } else {
+            poly::unifiable_cast(location, value, requested)
+        };
+
+        self.top_mut().append_operation_with_result(op)
     }
 }
 
