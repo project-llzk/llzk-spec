@@ -353,43 +353,40 @@ impl<'ctx> StructTypeProperties for WrapStructLike<'ctx> {
                 .into_iter()
                 .filter_map(|a| TypeAttribute::try_from(a).ok().map(|t| t.value()))
                 .any(|t| t.contains_type_vars()),
-            WrapStructLike::Pod(t) => t
-                .get_records()
-                .iter()
-                .any(|r| r.r#type().contains_type_vars()),
+            WrapStructLike::Pod(t) => t.records().iter().any(|r| r.r#type().contains_type_vars()),
         }
     }
 
     fn member(&self, member: &str, root: &Self::Scope) -> Option<Type<'ctx>> {
         match self {
             WrapStructLike::Struct(t) => {
-                let op = t.get_definition_from_module(root).ok()?;
-                let op = StructDefOpRef::try_from(op.get_operation()?).ok()?;
-                op.get_member_def(member)
+                let op = t.lookup_definition_from_module(root).ok()?;
+                let op = StructDefOpRef::try_from(op.operation()?).ok()?;
+                op.find_member_def(member)
                     .and_then(|def| def.has_public_attr().then_some(def.member_type()))
             }
-            WrapStructLike::Pod(t) => t.get_type_of_record(member),
+            WrapStructLike::Pod(t) => t.record_type(member),
         }
     }
 
     fn member_types(&self, root: &Self::Scope) -> Vec<Type<'ctx>> {
         match self {
             WrapStructLike::Struct(t) => {
-                let Ok(op) = t.get_definition_from_module(root) else {
+                let Ok(op) = t.lookup_definition_from_module(root) else {
                     return vec![];
                 };
                 let Some(op) = op
-                    .get_operation()
+                    .operation()
                     .and_then(|op| StructDefOpRef::try_from(op).ok())
                 else {
                     return vec![];
                 };
-                op.get_member_defs()
+                op.member_defs()
                     .into_iter()
                     .filter_map(|def| def.has_public_attr().then_some(def.member_type()))
                     .collect()
             }
-            WrapStructLike::Pod(t) => t.get_records().into_iter().map(|r| r.r#type()).collect(),
+            WrapStructLike::Pod(t) => t.records().into_iter().map(|r| r.r#type()).collect(),
         }
     }
 

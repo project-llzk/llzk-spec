@@ -58,7 +58,7 @@ pub fn emit_on_module<'ctx, 'ast>(
     filename: &str,
     document: &ast::Document<'ast>,
     circuit: &'ctx Module,
-) -> Result<Module<'ctx>, CompileError> {
+) -> Result<(), CompileError> {
     let typed_document = TypeChecker::check(
         MlirTypeSystem::new(ctx, circuit),
         &LlzkInfo::new(circuit),
