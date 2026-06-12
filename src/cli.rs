@@ -4,7 +4,7 @@ use crate::ast::AstContext;
 use crate::diagnostic::CompileError;
 use crate::ir::Context;
 use crate::ir::llzk::load_ir;
-use crate::ir::verif::emit_on_empty_module;
+use crate::ir::verif::emit_on_module;
 use crate::parser::parse_document;
 use crate::verify::verify_document;
 use clap::{Parser, ValueEnum};
@@ -78,14 +78,14 @@ pub fn run(args: Args) -> Result<(), CompileError> {
     if let Some(Emit::Ir) = args.emit {
         let ir_ctx = args.field.map(Context::with_field).unwrap_or_default();
         let circuit = ir_ctx.parse_module(&ir_name, &ir_source)?;
-        let module = emit_on_empty_module(&ir_ctx, &ctx, &spec_name, &document, &circuit)?;
-        if !module.as_operation().verify() {
+        emit_on_module(&ir_ctx, &ctx, &spec_name, &document, &circuit)?;
+        if !circuit.as_operation().verify() {
             return Err(CompileError::Ir(format!(
                 "spec module failed to verify\nModule:\n{}",
-                module.as_operation()
+                circuit.as_operation()
             )));
         }
-        dump::write_ir(&module, args.emit_dest.as_ref(), args.emit_format)?;
+        dump::write_ir(&circuit, args.emit_dest.as_ref(), args.emit_format)?;
 
         return Ok(());
     }

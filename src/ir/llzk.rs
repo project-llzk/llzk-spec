@@ -9,7 +9,7 @@ use crate::diagnostic::CompileError;
 use crate::ir::MlirTypeSystem;
 use crate::type_analysis::loops::{LoopInfo, LoopLabel};
 use crate::type_analysis::{
-    CircuitInfo, ContractTargetInfo, InputInfo, MemberInfo, OutputInfo, ParamInfo,
+    CircuitInfo, ContractTargetInfo, InputInfo, MemberInfo, OutputInfo, ParamInfo, TypeSystem,
 };
 use llzk::dialect::{
     array::ArrayType,
@@ -19,8 +19,8 @@ use llzk::dialect::{
 };
 use llzk::operation::WalkOperationMutLike;
 use llzk::prelude::{
-    FuncDefOpRef, FuncDefOpRefMut, PodType, StructDefOpRef, TemplateOpLike, TemplateOpRef,
-    TemplateSymbolBindingOpLike as _,
+    FuncDefOpRef, FuncDefOpRefMut, PodType, StructDefOpRef, SymbolRefAttribute, TemplateOpLike,
+    TemplateOpRef, TemplateSymbolBindingOpLike as _,
 };
 use melior::ir::{BlockLike, RegionLike, TypeLike as _, ValueLike};
 use melior::ir::{
@@ -48,43 +48,55 @@ impl<'ctx, 'm> LlzkInfo<'ctx, 'm> {
     }
 }
 
+/// Returns true if the given identifier is equivalent to the symbol.
+///
+/// The name must be a fully qualified name with its parts separated by `::`. Each part must be
+/// equal to each part of the symbol.
+fn check_fqn<M>(name: &Identifier<M>, fqn: SymbolRefAttribute) -> bool {
+    let name_parts = name.value().split("::").collect::<Vec<_>>();
+    let Ok(root) = fqn.root().as_str() else {
+        // If the root is not a UTF8 string then we consider it not equal since we expect the identifier to
+        // contain valid unicode.
+        return false;
+    };
+    let fqn_parts = std::iter::once(root)
+        .chain(fqn.nested().into_iter().map(|s| s.value()))
+        .collect::<Vec<_>>();
+
+    name_parts == fqn_parts
+}
+
+/// Attempts to extract an op of the given type if the fqn matches
+macro_rules! extract_target {
+    ($op:ident, $name:expr, $of_ref:ty, $target:ident, $result:ident) => {
+        if let Some($op) = <$of_ref>::from_option_raw($op.to_raw()) {
+            if check_fqn($name, $op.fully_qualified_name()) {
+                $result = Some(LlzkContractTarget::$target($op));
+                return WalkResult::Interrupt;
+            } else {
+                // Don't walk inside the operation since there isn't anything interesting to
+                // look at.
+                return WalkResult::Skip;
+            }
+        }
+    };
+}
+
 impl<'ctx, 'm> CircuitInfo<'ctx> for LlzkInfo<'ctx, 'm> {
     type Error = error::Error;
 
     type TypeSystem = MlirTypeSystem<'ctx, 'm>;
 
-    fn find_contract_target(
+    fn find_contract_target<M>(
         &self,
-        name: &Identifier,
+        name: &Identifier<M>,
     ) -> Result<impl ContractTargetInfo<'ctx, TypeSystem = Self::TypeSystem>, Self::Error> {
         let mut result = None;
         self.module
             .as_operation()
             .walk(WalkOrder::PreOrder, |operation| {
-                if let Some(struct_op) = StructDefOpRef::from_option_raw(operation.to_raw()) {
-                    let fqn =
-                        struct_contract_target_name(&struct_op, StructDefOpLike::name(&struct_op));
-                    if fqn == name.value() {
-                        result = Some(LlzkContractTarget::Struct(struct_op));
-                        return WalkResult::Interrupt;
-                    } else {
-                        // Don't walk inside the operation since there isn't anything interesting to
-                        // look at.
-                        return WalkResult::Skip;
-                    }
-                }
-
-                if let Some(func_op) = FuncDefOpRef::from_option_raw(operation.to_raw()) {
-                    let fqn = StringAttribute::try_from(func_op.fully_qualified_name()).unwrap();
-                    if fqn.value() == name.value() {
-                        result = Some(LlzkContractTarget::Function(func_op));
-                        return WalkResult::Interrupt;
-                    } else {
-                        // Don't walk inside the operation since there isn't anything interesting to
-                        // look at.
-                        return WalkResult::Skip;
-                    }
-                }
+                extract_target!(operation, name, StructDefOpRef, Struct, result);
+                extract_target!(operation, name, FuncDefOpRef, Function, result);
 
                 WalkResult::Advance
             });
@@ -94,9 +106,56 @@ impl<'ctx, 'm> CircuitInfo<'ctx> for LlzkInfo<'ctx, 'm> {
 }
 
 /// Implementation of [`ContractTargetInfo`] for LLZK structs and functions.
-enum LlzkContractTarget<'ctx, 'op> {
+#[derive(Copy, Clone, Debug)]
+pub(super) enum LlzkContractTarget<'ctx, 'op> {
     Struct(StructDefOpRef<'ctx, 'op>),
     Function(FuncDefOpRef<'ctx, 'op>),
+}
+
+impl<'ctx, 'op> LlzkContractTarget<'ctx, 'op> {
+    /// Returns the fully qualified name of the target.
+    pub fn fully_qualified_name(&self) -> SymbolRefAttribute<'ctx> {
+        match self {
+            LlzkContractTarget::Struct(op_ref) => op_ref.fully_qualified_name(),
+            LlzkContractTarget::Function(op_ref) => op_ref.fully_qualified_name(),
+        }
+    }
+
+    /// Returns the loops in the target.
+    pub fn loops(&self) -> Vec<LlzkLoopTarget<'ctx, 'op>> {
+        let mut loops = vec![];
+        self.walk(WalkOrder::PreOrder, |op| {
+            let i = op.name();
+            match i.as_string_ref().as_str().ok() {
+                Some("scf.for") => loops.push(LlzkLoopTarget::r#for(op, loops.len())),
+                Some("scf.while") => loops.push(LlzkLoopTarget::r#while(op, loops.len())),
+                _ => {}
+            };
+            WalkResult::Advance
+        });
+        loops
+    }
+}
+
+impl<'ctx, 'op> From<LlzkContractTarget<'ctx, 'op>> for OperationRef<'ctx, 'op> {
+    fn from(value: LlzkContractTarget<'ctx, 'op>) -> Self {
+        match value {
+            LlzkContractTarget::Struct(op_ref) => op_ref.into(),
+            LlzkContractTarget::Function(op_ref) => op_ref.into(),
+        }
+    }
+}
+
+impl<'ctx, 'op> OperationLike<'ctx, 'op> for LlzkContractTarget<'ctx, 'op> {
+    fn to_raw(&self) -> mlir_sys::MlirOperation {
+        OperationRef::from(*self).to_raw()
+    }
+}
+
+impl std::fmt::Display for LlzkContractTarget<'_, '_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(&OperationRef::from(*self), f)
+    }
 }
 
 impl<'ctx, 'op> ContractTargetInfo<'ctx> for LlzkContractTarget<'ctx, 'op> {
@@ -104,7 +163,7 @@ impl<'ctx, 'op> ContractTargetInfo<'ctx> for LlzkContractTarget<'ctx, 'op> {
 
     fn inputs(&self) -> impl Iterator<Item = InputInfo<'ctx, Type<'ctx>>> {
         let f = match self {
-            Self::Struct(op) => op.get_compute_func(),
+            Self::Struct(op) => op.compute_func(),
             Self::Function(op) => Some(*op),
         }
         .unwrap();
@@ -134,7 +193,7 @@ impl<'ctx, 'op> ContractTargetInfo<'ctx> for LlzkContractTarget<'ctx, 'op> {
             LlzkContractTarget::Function(op_ref) => Some(op_ref),
         }
         .into_iter()
-        .flat_map(|op_ref| op_ref.get_function_type())
+        .flat_map(|op_ref| op_ref.function_type())
         .flat_map(|t| {
             let count = t.result_count();
             (0..count).map(move |n| t.result(n).unwrap())
@@ -149,7 +208,7 @@ impl<'ctx, 'op> ContractTargetInfo<'ctx> for LlzkContractTarget<'ctx, 'op> {
             Self::Function(_) => None,
         }
         .into_iter()
-        .flat_map(|op| op.get_member_defs())
+        .flat_map(|op| op.member_defs())
         .map(move |m| {
             MemberInfo::new(
                 m.member_name(),
@@ -176,56 +235,96 @@ impl<'ctx, 'op> ContractTargetInfo<'ctx> for LlzkContractTarget<'ctx, 'op> {
     }
 
     fn loops(&self, ts: &mut Self::TypeSystem) -> Vec<LoopInfo<Type<'ctx>>> {
-        fn create_label<'c: 'a, 'a>(operation: OperationRef<'c, 'a>, next_id: usize) -> LoopLabel {
-            operation
-                .attribute("loop_label")
-                .ok()
-                .and_then(|attribute| StringAttribute::try_from(attribute).ok())
-                .map(|attribute| attribute.value())
-                .map(LoopLabel::named)
-                .unwrap_or(LoopLabel::implicit(next_id))
-        }
-
-        let mut info = vec![];
-        let op_ref: OperationRef = match *self {
-            Self::Struct(op_ref) => op_ref.into(),
-            Self::Function(op_ref) => op_ref.into(),
-        };
-        op_ref.walk(WalkOrder::PreOrder, |op| {
-            let i = op.name();
-            let label = create_label(op, info.len());
-            match i.as_string_ref().as_str().ok().unwrap() {
-                "scf.for" => {
-                    info.push(LoopInfo::new_for_loop(
-                        label,
-                        ts,
-                        // `scf.for` loops have 3 base operands (lb, up, stride) and then its extra arguments.
-                        // The types for those 3 operands + the inductive variable are handled
-                        // by the constructor.
-                        op.operands()
-                            .skip(3)
-                            .map(|v| unsafe { Type::from_raw(v.r#type().to_raw()) }),
-                    ));
-                }
-                "scf.while" => {
-                    info.push(LoopInfo::new_while_loop(
-                        label,
-                        op.operands()
-                            .map(|v| unsafe { Type::from_raw(v.r#type().to_raw()) }),
-                    ));
-                }
-                _ => {}
-            };
-            WalkResult::Advance
-        });
-        info
+        self.loops()
+            .into_iter()
+            .map(|op| match op.kind {
+                LoopKind::For => LoopInfo::new_for_loop(
+                    op.label(),
+                    |_| ts.felt_type(),
+                    op.extra_operands_types(),
+                ),
+                LoopKind::While => LoopInfo::new_while_loop(op.label(), op.extra_operands_types()),
+            })
+            .collect()
     }
 
     fn self_type(&self) -> Option<Type<'ctx>> {
         match self {
-            Self::Struct(op) => Some(op.r#type().into()),
+            Self::Struct(op) => Some(fix_struct_type(op.r#type()).into()),
             Self::Function(_) => None,
         }
+    }
+}
+
+/// Convert `!struct.type<@Foo>` into `!struct.type<@Foo<[]>>`.
+fn fix_struct_type<'ctx>(s: StructType<'ctx>) -> StructType<'ctx> {
+    if s.params().is_none() {
+        StructType::new(s.name(), &[])
+    } else {
+        s
+    }
+}
+
+/// Reference to a loop.
+#[derive(Debug, Copy, Clone)]
+pub(super) struct LlzkLoopTarget<'ctx, 'op> {
+    op: OperationRef<'ctx, 'op>,
+    kind: LoopKind,
+    idx: usize,
+}
+
+impl<'ctx, 'blk> LlzkLoopTarget<'ctx, 'blk> {
+    /// Create a `for` variant.
+    fn r#for(op: OperationRef, idx: usize) -> Self {
+        Self {
+            op: unsafe { OperationRef::from_raw(op.to_raw()) },
+            kind: LoopKind::For,
+            idx,
+        }
+    }
+
+    /// Create a `while` variant.
+    fn r#while(op: OperationRef, idx: usize) -> Self {
+        Self {
+            op: unsafe { OperationRef::from_raw(op.to_raw()) },
+            kind: LoopKind::While,
+            idx,
+        }
+    }
+
+    /// Returns the label associated with the loop.
+    pub fn label(&self) -> LoopLabel {
+        self.attribute("loop_label")
+            .ok()
+            .and_then(|attribute| StringAttribute::try_from(attribute).ok())
+            .map(|attribute| attribute.value())
+            .map(LoopLabel::named)
+            .unwrap_or(LoopLabel::implicit(self.idx))
+    }
+
+    /// Returns the extra operands the loop has.
+    pub fn extra_operands_types(&self) -> impl Iterator<Item = Type<'ctx>> {
+        // `scf.for` loops have 3 base operands (lb, up, stride) and then its extra arguments.
+        // The types for those 3 operands + the inductive variable are handled
+        // by the constructor.
+        self.operands()
+            .skip(match self.kind {
+                LoopKind::For => 3,
+                LoopKind::While => 0,
+            })
+            .map(|v| v.r#type())
+    }
+}
+
+impl<'ctx, 'op> OperationLike<'ctx, 'op> for LlzkLoopTarget<'ctx, 'op> {
+    fn to_raw(&self) -> mlir_sys::MlirOperation {
+        self.op.to_raw()
+    }
+}
+
+impl std::fmt::Display for LlzkLoopTarget<'_, '_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(&self.op, f)
     }
 }
 
@@ -481,7 +580,7 @@ fn collect_struct_contract_metadata<'c: 'a, 'a>(
 ) -> ContractMetadata {
     let mut metadata = ContractMetadata::default();
 
-    for member in struct_op.get_member_defs() {
+    for member in struct_op.member_defs() {
         let member_name = member.member_name().to_string();
         metadata.visible_symbols.insert(member_name.clone());
         collect_member_paths(
@@ -494,9 +593,9 @@ fn collect_struct_contract_metadata<'c: 'a, 'a>(
     }
 
     for name in struct_op
-        .get_template_param_op_names()
+        .template_param_op_names()
         .into_iter()
-        .chain(struct_op.get_template_expr_op_names())
+        .chain(struct_op.template_expr_op_names())
     {
         metadata.visible_symbols.insert(flat_symbol_name(name));
     }
@@ -560,17 +659,17 @@ fn collect_struct_member_paths<'c: 'a, 'a>(
     parent_accessible: bool,
     member_paths: &mut HashMap<String, bool>,
 ) {
-    let Ok(lookup) = struct_type.get_definition(root) else {
+    let Ok(lookup) = struct_type.lookup_definition(root) else {
         return;
     };
-    let Some(operation) = lookup.get_operation() else {
+    let Some(operation) = lookup.operation() else {
         return;
     };
     let Ok(struct_def) = StructDefOpRef::try_from(operation) else {
         return;
     };
 
-    for member in struct_def.get_member_defs() {
+    for member in struct_def.member_defs() {
         let path = format!("{prefix}.{}", member.member_name());
         let accessible = parent_accessible && member.has_public_attr();
         member_paths.insert(path.clone(), accessible);
@@ -591,7 +690,7 @@ fn collect_pod_member_paths<'c: 'a, 'a>(
     parent_accessible: bool,
     member_paths: &mut HashMap<String, bool>,
 ) {
-    for record in pod_type.get_records() {
+    for record in pod_type.records() {
         let record_name = record
             .name()
             .as_string_ref()

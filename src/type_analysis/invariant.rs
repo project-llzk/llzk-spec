@@ -63,7 +63,7 @@ impl<'ctx, 'ast, T: TypeSystem> InvariantTypeChecker<'ctx, 'ast, T> {
         let bindings = info
             .bindings()
             .iter()
-            .map(|b| b.r#type().clone())
+            .map(|(_, b)| b.clone())
             .collect::<Vec<_>>();
 
         self.ctx.scope().push(());
