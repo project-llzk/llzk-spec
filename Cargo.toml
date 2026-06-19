@@ -8,8 +8,8 @@ repository = "https://github.com/project-llzk/llzk-spec"
 
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
-llzk = { git = "https://github.com/project-llzk/llzk-rs", features = ["bigint"], branch = "dani/builder-improvements" }
-llzk-sys = { git = "https://github.com/project-llzk/llzk-rs", branch = "dani/builder-improvements" }
+llzk = { git = "https://github.com/project-llzk/llzk-rs", features = ["bigint"], branch = "dani/verif-and-quant-ops" }
+llzk-sys = { git = "https://github.com/project-llzk/llzk-rs", branch = "dani/verif-and-quant-ops" }
 melior = "0.25"
 mlir-sys = "0.5"
 pest = "2.7"

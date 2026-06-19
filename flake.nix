@@ -4,7 +4,7 @@
     nixpkgs.follows = "llzk-pkgs/nixpkgs";
     flake-utils.follows = "llzk-pkgs/flake-utils";
     llzk-rs-pkgs = {
-      url = "github:project-llzk/llzk-rs";
+      url = "github:project-llzk/llzk-rs?ref=dani/verif-and-quant-ops";
       inputs = {
         nixpkgs.follows = "llzk-pkgs/nixpkgs";
         flake-utils.follows = "llzk-pkgs/flake-utils";
