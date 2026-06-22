@@ -1,0 +1,5 @@
+added:
+  - Support for `function.arg_name` argument names
+
+fixed:
+  - Conditional `let` scoping issue
