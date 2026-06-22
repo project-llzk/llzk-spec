@@ -153,27 +153,30 @@ impl<'ast, 'ctx, 'blk> ast::Visitor<TypedContractDecl<'ast, 'ctx>>
         })?;
 
         // Create a function def op pretending to be the contract for now.
-        let block = verif::contract(
+        let contract = verif::contract(
             self.builder(),
             location,
             name.value(),
             target.fully_qualified_name(),
-        )?
-        .body()?
-        .first_block()
-        .unwrap();
+        )?;
+        let block = contract.body()?.first_block().unwrap();
         self.push_tagged(block, ScopeTag::Contract);
         self.bind_template_consts(parent_op, decl, location)?;
         match target {
             LlzkContractTarget::Struct(target_op) => {
                 // Bind the members as `struct.readm` operations reading from argument #0
                 self.bind_members(target_op, location, Value::from(block.argument(0)?), decl)?;
-                // Bind the inputs from the rest of the arguments of the function.
-                self.bind_inputs(target_op.compute_func().unwrap(), block, Some(1), decl)?;
+                // Bind the inputs from the rest of the contract arguments.
+                let source_offset = target_op
+                    .constrain_func()
+                    .map(|_| 1)
+                    .or_else(|| target_op.compute_func().map(|_| 0))
+                    .unwrap();
+                self.bind_contract_inputs(contract, block, Some(source_offset), Some(1), decl)?;
             }
             LlzkContractTarget::Function(target_op) => {
                 // Bind the inputs (the first N arguments of the contract)
-                self.bind_inputs(target_op, block, None, decl)?;
+                self.bind_contract_inputs(contract, block, None, None, decl)?;
                 // Bind the outputs (the rest of the arguments of the contract)
                 self.bind_outputs(
                     target_op,

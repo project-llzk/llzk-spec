@@ -77,15 +77,12 @@ where
         self.ctx.scope().push_local_limit(());
 
         // Fill the scope with template parameters
-        for info in info.template_params().filter(|info| info.r#type.is_some()) {
+        for info in info.template_params() {
             let name = self.ident(info.name, decl);
-            diags.extract_type_result(
-                self.ctx
-                    .scope()
-                    .top()
-                    .bind_local(&name, info.r#type.unwrap()),
-                || format!("while binding template parameter '{}'", info.name),
-            );
+            let ty = info.r#type.unwrap_or_else(|| self.ctx.ts().felt_type());
+            diags.extract_type_result(self.ctx.scope().top().bind_local(&name, ty), || {
+                format!("while binding template parameter '{}'", info.name)
+            });
         }
 
         // Fill the scope with input arguments as parameters (with the param number)

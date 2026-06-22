@@ -7,6 +7,7 @@ use llzk::{
         array, cast, function,
         poly::{self, unifiable_cast},
         r#struct,
+        verif::{ContractOpLike, ContractOpRef},
     },
     prelude::{
         ArrayType, FlatSymbolRefAttribute, FuncDefOp, FuncDefOpLike as _, FuncDefOpRef,
@@ -24,12 +25,13 @@ use melior::{
         RegionLike as _, Type, TypeLike, Value, ValueLike,
     },
 };
+use mlir_sys::mlirDictionaryAttrGetElementByName;
 
 use crate::{
     ast::{self, Span, Spanned, Visitable, Visitor},
     diagnostic::CompileError,
     ir::{
-        llzk::LlzkContractTarget,
+        llzk::{LlzkContractTarget, function_input_name},
         verif::{
             SpecCodegen, TypedExpression, TypedIdentifier, TypedPredicateDecl,
             affine::{AffineExpr, AffineMap},
@@ -338,7 +340,6 @@ impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
             template_op
                 .const_binding_ops()
                 .into_iter()
-                .filter(|param_ops| param_ops.type_opt().is_some())
                 .try_for_each(|param_op| {
                     let symbol = param_op.sym_name();
                     let read_value = self.insert_op_with_result(poly::read_const(
@@ -428,19 +429,62 @@ impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
         &mut self,
         func: FuncDefOpRef<'ctx, 'blk>,
         block: BlockRef<'ctx, 'blk>,
-        offset: Option<usize>,
+        source_offset: Option<usize>,
+        block_offset: Option<usize>,
         span: &dyn Spanned,
     ) -> Result<(), CompileError> {
-        let arg_count = func.function_type()?.input_count();
+        let source_offset = source_offset.unwrap_or_default();
+        let block_offset = block_offset.unwrap_or_default();
+        let arg_count = func
+            .function_type()?
+            .input_count()
+            .saturating_sub(source_offset);
         (0..arg_count).try_for_each(|n| -> Result<(), CompileError> {
-            let arg = Value::from(block.argument(n + offset.unwrap_or_default())?);
+            let arg = Value::from(block.argument(n + block_offset)?);
+            let source_idx = n + source_offset;
 
-            let name = match func
-                .argument_attr(n, "function.arg_name")
-                .and_then(|a| Ok(StringAttribute::try_from(a)?.value()))
-                .ok()
-            {
-                Some(arg_name) => self.create_ident(arg_name, span),
+            let name = match function_input_name(func, source_idx) {
+                Some(arg_name) => self.create_ident(&arg_name, span),
+                None => self.create_ident(&format!("$arg[{n}]"), span),
+            };
+
+            self.scope
+                .top()
+                .bind_parameter(&name, arg, n)
+                .map_err(|err| {
+                    err.into_compile_error(
+                        &self.filename,
+                        Some(span.span()),
+                        format!("while binding argument #{n} of target"),
+                    )
+                })
+        })
+    }
+
+    /// Binds block arguments as parameters in the scope based on the metadata in a
+    /// `verif.contract` op.
+    ///
+    /// If given, the block arguments are offset by the `offset` parameter.
+    pub fn bind_contract_inputs(
+        &mut self,
+        contract: ContractOpRef<'ctx, 'blk>,
+        block: BlockRef<'ctx, 'blk>,
+        source_offset: Option<usize>,
+        block_offset: Option<usize>,
+        span: &dyn Spanned,
+    ) -> Result<(), CompileError> {
+        let source_offset = source_offset.unwrap_or_default();
+        let block_offset = block_offset.unwrap_or_default();
+        let arg_count = contract
+            .function_type()?
+            .input_count()
+            .saturating_sub(source_offset);
+        (0..arg_count).try_for_each(|n| -> Result<(), CompileError> {
+            let arg = Value::from(block.argument(n + block_offset)?);
+            let source_idx = n + source_offset;
+
+            let name = match contract_input_name(contract, source_idx) {
+                Some(arg_name) => self.create_ident(&arg_name, span),
                 None => self.create_ident(&format!("$arg[{n}]"), span),
             };
 
@@ -595,6 +639,26 @@ impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
         ));
         Ok(arr)
     }
+}
+
+fn contract_input_name<'ctx, 'blk>(
+    contract: ContractOpRef<'ctx, 'blk>,
+    idx: usize,
+) -> Option<String> {
+    if !contract.has_arg_name(idx.try_into().ok()?) {
+        return None;
+    }
+    let arg_attrs = contract.arg_attrs().ok()?;
+    let arg = arg_attrs.get(idx)?;
+    let attr = unsafe {
+        melior::ir::Attribute::from_option_raw(mlirDictionaryAttrGetElementByName(
+            arg.to_raw(),
+            melior::StringRef::new("function.arg_name").to_raw(),
+        ))
+    }?;
+    StringAttribute::try_from(attr)
+        .ok()
+        .map(|attr| attr.value().to_string())
 }
 
 /// Visits an entity inside a fresh scope.

@@ -39,7 +39,8 @@ template-generated or nested IR, authors use fully qualified LLZK names such as
 
 Inside a contract, bare names are resolved against the symbols visible from that
 target. This includes public members, visible template parameters, visible
-`poly.expr` names, and local bindings introduced by the spec.
+named LLZK inputs from `function.arg_name`, visible `poly.expr` names, and
+local bindings introduced by the spec.
 
 ## Requirements And Ensures
 

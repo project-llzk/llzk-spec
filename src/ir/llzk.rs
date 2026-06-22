@@ -22,13 +22,13 @@ use llzk::prelude::{
     FuncDefOpRef, FuncDefOpRefMut, OperationMutLike, PodType, StructDefOpRef, SymbolRefAttribute,
     TemplateOpLike, TemplateOpRef, TemplateSymbolBindingOpLike as _,
 };
-use melior::ir::{BlockLike, RegionLike, TypeLike as _, ValueLike};
 use melior::ir::{
     Module, OperationRef, Type,
     attribute::FlatSymbolRefAttribute,
     attribute::StringAttribute,
     operation::{OperationLike, WalkOrder, WalkResult},
 };
+use melior::ir::{TypeLike as _, ValueLike};
 use mlir_sys::mlirOperationGetParentOperation;
 use std::collections::{HashMap, HashSet};
 
@@ -162,25 +162,25 @@ impl<'ctx, 'op> ContractTargetInfo<'ctx> for LlzkContractTarget<'ctx, 'op> {
     type TypeSystem = MlirTypeSystem<'ctx, 'op>;
 
     fn inputs(&self) -> impl Iterator<Item = InputInfo<'ctx, Type<'ctx>>> {
-        let f = match self {
-            Self::Struct(op) => op.compute_func(),
-            Self::Function(op) => Some(*op),
-        }
-        .unwrap();
+        let (f, source_offset) = match self {
+            Self::Struct(op) => op
+                .constrain_func()
+                .map(|func| (func, 1))
+                .or_else(|| op.compute_func().map(|func| (func, 0)))
+                .unwrap(),
+            Self::Function(op) => (*op, 0),
+        };
         let arg_count = f
-            .region(0)
-            .unwrap()
-            .first_block()
-            .map(|block| block.argument_count())
+            .function_type()
+            .map(|t| t.input_count().saturating_sub(source_offset))
             .unwrap_or_default();
         (0..arg_count).map(move |n| {
-            let name = f
-                .argument_attr(n, "function.arg_name")
-                .and_then(|a| Ok(StringAttribute::try_from(a)?.value()))
-                .ok();
-            let t = unsafe { Type::from_raw(f.argument(n).unwrap().r#type().to_raw()) };
+            let source_idx = n + source_offset;
+            let name = function_input_name(f, source_idx);
+            let t = unsafe { Type::from_raw(f.argument(source_idx).unwrap().r#type().to_raw()) };
+
             match name {
-                Some(name) => InputInfo::named(name, t),
+                Some(name) => InputInfo::named(Box::leak(name.into_boxed_str()), t),
                 None => InputInfo::unnamed(t),
             }
         })
@@ -614,6 +614,9 @@ fn collect_struct_contract_metadata<'c: 'a, 'a>(
     {
         metadata.visible_symbols.insert(flat_symbol_name(name));
     }
+    metadata
+        .visible_symbols
+        .extend(collect_function_input_names(struct_op));
 
     metadata
 }
@@ -647,6 +650,145 @@ fn collect_function_contract_metadata<'c: 'a, 'a>(
         }
     }
     metadata
+        .visible_symbols
+        .extend(collect_function_input_names(operation));
+    metadata
+}
+
+fn collect_function_input_names<'c: 'a, 'a>(
+    operation: &impl OperationLike<'c, 'a>,
+) -> HashSet<String> {
+    let mut names = HashSet::new();
+    let collect = |func: FuncDefOpRef<'c, 'a>, names: &mut HashSet<String>| {
+        let arg_count = func
+            .function_type()
+            .map(|t| t.input_count())
+            .unwrap_or_default();
+        for n in 0..arg_count {
+            if let Some(name) = function_input_name(func, n) {
+                names.insert(name);
+            }
+        }
+    };
+
+    if let Some(func) = FuncDefOpRef::from_option_raw(operation.to_raw()) {
+        collect(func, &mut names);
+        return names;
+    }
+
+    if let Some(struct_op) = StructDefOpRef::from_option_raw(operation.to_raw()) {
+        if let Some(func) = struct_op.compute_func() {
+            collect(func, &mut names);
+        }
+        if let Some(func) = struct_op.constrain_func() {
+            let arg_count = func
+                .function_type()
+                .map(|t| t.input_count())
+                .unwrap_or_default();
+            for n in 1..arg_count {
+                if let Some(name) = function_input_name(func, n) {
+                    names.insert(name);
+                }
+            }
+        }
+    }
+
+    names
+}
+
+pub(crate) fn function_input_name<'c, 'a>(
+    func: FuncDefOpRef<'c, 'a>,
+    idx: usize,
+) -> Option<String> {
+    func.argument_attr(idx, "function.arg_name")
+        .and_then(|a| Ok(StringAttribute::try_from(a)?.value().to_string()))
+        .ok()
+        .or_else(|| {
+            fallback_function_input_names(func)
+                .get(idx)
+                .cloned()
+                .flatten()
+        })
+}
+
+fn fallback_function_input_names<'c, 'a>(func: FuncDefOpRef<'c, 'a>) -> Vec<Option<String>> {
+    let text = func.to_string();
+    let Some(open_idx) = text.find('(') else {
+        return vec![];
+    };
+
+    let mut close_idx = None;
+    let mut angle = 0usize;
+    let mut brace = 0usize;
+    let mut bracket = 0usize;
+    let mut paren = 0usize;
+    let mut in_string = false;
+
+    for (i, ch) in text.char_indices().skip_while(|(i, _)| *i < open_idx) {
+        match ch {
+            '"' => in_string = !in_string,
+            _ if in_string => {}
+            '(' => paren += 1,
+            ')' => {
+                paren = paren.saturating_sub(1);
+                if paren == 0 {
+                    close_idx = Some(i);
+                    break;
+                }
+            }
+            '<' => angle += 1,
+            '>' => angle = angle.saturating_sub(1),
+            '{' => brace += 1,
+            '}' => brace = brace.saturating_sub(1),
+            '[' => bracket += 1,
+            ']' => bracket = bracket.saturating_sub(1),
+            _ => {}
+        }
+    }
+
+    let Some(close_idx) = close_idx else {
+        return vec![];
+    };
+    let args = &text[(open_idx + 1)..close_idx];
+    let mut result = Vec::new();
+    let mut start = 0usize;
+    angle = 0;
+    brace = 0;
+    bracket = 0;
+    paren = 0;
+    in_string = false;
+
+    for (i, ch) in args.char_indices() {
+        match ch {
+            '"' => in_string = !in_string,
+            _ if in_string => {}
+            '(' => paren += 1,
+            ')' => paren = paren.saturating_sub(1),
+            '<' => angle += 1,
+            '>' => angle = angle.saturating_sub(1),
+            '{' => brace += 1,
+            '}' => brace = brace.saturating_sub(1),
+            '[' => bracket += 1,
+            ']' => bracket = bracket.saturating_sub(1),
+            ',' if angle == 0 && brace == 0 && bracket == 0 && paren == 0 => {
+                result.push(parse_arg_name(&args[start..i]));
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    if start < args.len() {
+        result.push(parse_arg_name(&args[start..]));
+    }
+    result
+}
+
+fn parse_arg_name(arg: &str) -> Option<String> {
+    let marker = "function.arg_name = \"";
+    let start = arg.find(marker)? + marker.len();
+    let rest = &arg[start..];
+    let end = rest.find('"')?;
+    Some(rest[..end].to_string())
 }
 
 /// Collect member reference paths to populate `member_paths`, using `root` as

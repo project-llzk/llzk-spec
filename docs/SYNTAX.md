@@ -48,7 +48,17 @@ referenced directly by name.
 
 ### Unnamed function inputs
 
-If the LLZK IR does not expose a usable input symbol name using the `function.arg_name` attribute, use `arg[N]`:
+If the LLZK IR exposes a usable input symbol name using the `function.arg_name`
+attribute, you can reference that input directly as a bare name:
+
+```spec
+contract for Num2Bits::Num2Bits {
+  ensure in == in;
+}
+```
+
+If the LLZK IR does not expose a usable input symbol name using the
+`function.arg_name` attribute, use `arg[N]`:
 
 ```spec
 contract for IsZero::IsZero {
@@ -329,7 +339,8 @@ The current implementation is intentionally structural.
 
 - It validates symbol existence and visibility, not full semantic correctness.
 - It does not yet lower specs into MLIR (dependent on `verif` dialect implementation).
-- Named LLZK function inputs (`function.arg_name`) are not yet supported in llzk-lib.
+- Named LLZK function inputs are available when the LLZK IR carries a
+  `function.arg_name` attribute; otherwise use `arg[N]`.
 - Nested `struct.type` access checks public visibility, but this is still name-
   and shape-based validation rather than deep type reasoning.
 - Diagnostics and examples should be treated as the source of truth over any
