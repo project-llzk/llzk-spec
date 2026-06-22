@@ -6,7 +6,7 @@
 use std::slice;
 
 use llzk::{
-    builder::OpBuilder,
+    builder::{OpBuilder, OpBuilderLike},
     dialect::{array, bool, felt, function, llzk::nondet, pod, r#struct, verif},
     prelude::*,
 };
@@ -334,17 +334,36 @@ impl<'ast, 'ctx> ast::Visitor<TypedStatement<'ast, 'ctx>> for SpecCodegen<'ast, 
                     .append_operation(function::r#return(location, &[value]));
                 Ok(())
             }
-            Increases { .. } => match self.closest_tag() {
-                ScopeTag::Predicate => stmt_not_allowed!("increases", "predicates"),
-                _ => todo!("increases statement is not supported yet"),
+            Increases { expression, span } => match self.closest_tag() {
+                ScopeTag::Invariant => {
+                    let value = expression.accept(self)?;
+                    verif::increases(self.builder(), self.location(*span), value);
+                    Ok(())
+                }
+                _ => stmt_not_allowed!("increases", "predicates"),
             },
-            Decreases { .. } => match self.closest_tag() {
-                ScopeTag::Predicate => stmt_not_allowed!("decreases", "predicates"),
-                _ => todo!("decreases statement is not supported yet"),
+            Decreases { expression, span } => match self.closest_tag() {
+                ScopeTag::Invariant => {
+                    let value = expression.accept(self)?;
+                    verif::decreases(self.builder(), self.location(*span), value);
+                    Ok(())
+                }
+                _ => stmt_not_allowed!("decreases", "predicates"),
             },
-            Step { .. } => match self.closest_tag() {
-                ScopeTag::Predicate => stmt_not_allowed!("step", "predicates"),
-                _ => todo!("step statement is not supported yet"),
+            Step { expression, span } => match self.closest_tag() {
+                ScopeTag::Invariant => {
+                    let op = verif::step(self.builder(), self.location(*span));
+                    let block = op.region(0)?.append_block(melior::ir::Block::new(&[]));
+                    let saved = self.builder().save_insertion_point();
+                    self.builder().set_insertion_point_at_end(block);
+                    let value = expression.accept(self);
+                    if let Ok(value) = &value {
+                        verif::step_yield(self.builder(), self.location(*span), *value);
+                    }
+                    self.builder().restore_insertion_point(saved);
+                    Ok(())
+                }
+                _ => stmt_not_allowed!("step", "predicates"),
             },
             Invariant(decl) => match self.closest_tag() {
                 ScopeTag::Predicate => stmt_not_allowed!("invariant", "predicates"),
@@ -361,8 +380,36 @@ impl<'ast, 'ctx, 'blk> ast::Visitor<TypedInvariantDecl<'ast, 'ctx>>
 {
     type Output = Result<(), CompileError>;
 
-    fn visit(&mut self, _: &TypedInvariantDecl<'ast, 'ctx>) -> Self::Output {
-        todo!("invariant statement is not supported yet");
+    fn visit(&mut self, decl: &TypedInvariantDecl<'ast, 'ctx>) -> Self::Output {
+        let args = decl
+            .bindings()
+            .iter()
+            .map(|ident| (*ident.meta(), self.location(ident.span())))
+            .collect::<Vec<_>>();
+        let op = verif::invariant(
+            self.builder(),
+            self.location(decl.span()),
+            decl.loop_name().value(),
+            &args,
+        );
+        let body = op.body();
+        assert_eq!(body.argument_count(), decl.bindings().len());
+        self.push_tagged(body, ScopeTag::Invariant);
+        for (n, ident) in decl.bindings().iter().enumerate() {
+            let arg = body.argument(n)?;
+            self.top_mut()
+                .bind_local(ident, arg.into())
+                .map_err(|err| {
+                    err.into_compile_error(
+                        &self.filename,
+                        Some(ident.span()),
+                        format!("while binding invariant argument #{n} '{}'", ident.value()),
+                    )
+                })?;
+        }
+        decl.body().accept(self)?;
+        self.pop();
+        Ok(())
     }
 }
 
@@ -584,7 +631,15 @@ impl<'ast, 'ctx, 'blk> ast::Visitor<TypedExpression<'ast, 'ctx>> for SpecCodegen
                 let op = array::len(location, target_value, dim);
                 self.top_mut().append_operation_with_result(op)
             }
-            Old { .. } => todo!("old expression is not supported yet"),
+            Old {
+                expression,
+                span,
+                meta,
+            } => {
+                let value = expression.accept(self)?;
+                let op = verif::old(self.builder(), self.location(*span), value);
+                Ok(op.result(0)?.into())
+            }
             Arg { index, span, .. } => self.scope.find_parameter(index).copied().map_err(|err| {
                 err.into_compile_error(&self.filename, Some(*span), format!("on argument #{index}"))
             }),
