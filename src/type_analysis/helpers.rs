@@ -29,6 +29,8 @@ impl BinaryOp {
             | BinaryOp::Le
             | BinaryOp::Gt
             | BinaryOp::Ge
+            | BinaryOp::Shl
+            | BinaryOp::Shr
             | BinaryOp::Add
             | BinaryOp::Sub
             | BinaryOp::Mul
@@ -50,7 +52,9 @@ impl BinaryOp {
             | BinaryOp::Le
             | BinaryOp::Gt
             | BinaryOp::Ge => t.bool_type(),
-            BinaryOp::Add
+            BinaryOp::Shl
+            | BinaryOp::Shr
+            | BinaryOp::Add
             | BinaryOp::Sub
             | BinaryOp::Mul
             | BinaryOp::Div

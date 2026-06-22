@@ -6,11 +6,13 @@ contract for Foo {
   let a = nondet;
   let b = nondet;
   let c = nondet;
+  let d = nondet;
 
   require true;
   ensure !false || a != b && c <= a;
   ensure a >= b ? -a == b : out[0] == len(out);
   ensure (a / 1) % 2 == (b & c) ** 3;
+  ensure (a << b) == (c >> d);
 }
 
 // CHECK-DAG: "kind": "require"
@@ -27,3 +29,5 @@ contract for Foo {
 // CHECK-DAG: "op": "mod"
 // CHECK-DAG: "op": "bit_and"
 // CHECK-DAG: "op": "pow"
+// CHECK-DAG: "op": "shl"
+// CHECK-DAG: "op": "shr"

@@ -177,6 +177,7 @@ The current language supports:
 - logical: `&&`, `||`
 - equality: `==`, `!=`
 - relational: `<`, `<=`, `>`, `>=`
+- shifts: `<<`, `>>`
 - arithmetic: `+`, `-`, `*`, `/`, `%`, `**`
 - bitwise-and: `&`
 - ternary conditionals: `cond ? a : b`
@@ -186,6 +187,9 @@ Expressions are composable:
 ```spec
 ensure d - ((a + b) * c) == 0;
 ```
+
+Shift operators are left-associative and use C-like precedence: additive operators bind
+tighter than shifts, and shifts bind tighter than relational comparisons.
 
 Examples: `tests/lit/expressions.spec`, `tests/lit/parentheses.spec`
 

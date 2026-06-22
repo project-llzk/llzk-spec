@@ -116,6 +116,10 @@ contract for Foo {
 }
 ```
 
+Expressions support the existing logical, comparison, arithmetic, exponentiation, and
+bitwise-and operators, plus left and right shifts (`<<`, `>>`). Shift expressions are
+left-associative and use C-like precedence between additive and relational operators.
+
 `let x = nondet;` introduces an unconstrained value in the spec. This can useful for
 expressing existential or helper values before the language has richer type and
 lowering support:
