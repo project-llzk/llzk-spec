@@ -508,7 +508,7 @@ checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
 [[package]]
 name = "llzk"
 version = "0.4.0"
-source = "git+https://github.com/project-llzk/llzk-rs?branch=dani%2Fverif-and-quant-ops#3528690794967085c6d5c50663a3e3aba62ebc46"
+source = "git+https://github.com/project-llzk/llzk-rs?branch=dani%2Fverif-and-quant-ops#e2504b32a1a01905e5ca56d013195806bbc343e7"
 dependencies = [
  "llzk-macro",
  "llzk-sys",
@@ -523,7 +523,7 @@ dependencies = [
 [[package]]
 name = "llzk-macro"
 version = "0.3.0"
-source = "git+https://github.com/project-llzk/llzk-rs?branch=dani%2Fverif-and-quant-ops#3528690794967085c6d5c50663a3e3aba62ebc46"
+source = "git+https://github.com/project-llzk/llzk-rs?branch=dani%2Fverif-and-quant-ops#e2504b32a1a01905e5ca56d013195806bbc343e7"
 dependencies = [
  "convert_case",
  "proc-macro2",
@@ -556,7 +556,7 @@ dependencies = [
 [[package]]
 name = "llzk-sys"
 version = "20.0.0"
-source = "git+https://github.com/project-llzk/llzk-rs?branch=dani%2Fverif-and-quant-ops#3528690794967085c6d5c50663a3e3aba62ebc46"
+source = "git+https://github.com/project-llzk/llzk-rs?branch=dani%2Fverif-and-quant-ops#e2504b32a1a01905e5ca56d013195806bbc343e7"
 dependencies = [
  "anyhow",
  "llzk-sys-build-support",
@@ -566,7 +566,7 @@ dependencies = [
 [[package]]
 name = "llzk-sys-build-support"
 version = "1.0.1"
-source = "git+https://github.com/project-llzk/llzk-rs?branch=dani%2Fverif-and-quant-ops#3528690794967085c6d5c50663a3e3aba62ebc46"
+source = "git+https://github.com/project-llzk/llzk-rs?branch=dani%2Fverif-and-quant-ops#e2504b32a1a01905e5ca56d013195806bbc343e7"
 dependencies = [
  "anyhow",
  "bindgen 0.71.1",

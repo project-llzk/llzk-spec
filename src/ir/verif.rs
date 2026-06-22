@@ -29,6 +29,7 @@ use crate::{
     type_analysis::TypeChecker,
 };
 
+mod affine;
 mod helpers;
 mod scope;
 
@@ -611,7 +612,48 @@ impl<'ast, 'ctx, 'blk> ast::Visitor<TypedExpression<'ast, 'ctx>> for SpecCodegen
                 )?;
                 self.top_mut().append_operation_with_result(op)
             }
-            Quantifier { .. } => todo!("quantifier expression is not supported yet"),
+            Quantifier {
+                quantifier_kind,
+                binding,
+                domain,
+                body,
+                span,
+                ..
+            } => {
+                let location = self.location(*span);
+                let domain = match domain {
+                    ast::QuantifierDomain::Range { start, end, span } => {
+                        let from = start.accept(self)?;
+                        let to = end.accept(self)?;
+                        let location = self.location(*span);
+                        self.fill_array_with_range(location, from, to)?
+                    }
+                    ast::QuantifierDomain::Expr(expression) => expression.accept(self)?,
+                };
+
+                let op = match quantifier_kind {
+                    ast::QuantifierKind::Forall => bool::forall(self.builder(), location, domain),
+                    ast::QuantifierKind::Exists => bool::exists(self.builder(), location, domain),
+                }?;
+                let block = op.region(0).unwrap().first_block().unwrap();
+                self.push(block);
+                self.top_mut()
+                    .bind_local(binding, block.argument(0).unwrap().into())
+                    .map_err(|err| {
+                        err.into_compile_error(
+                            &self.filename,
+                            Some(binding.span()),
+                            format!(
+                                "while binding {quantifier_kind} expression argument '{}'",
+                                binding.value()
+                            ),
+                        )
+                    })?;
+                let result = body.accept(self)?;
+                bool::r#yield(self.builder(), location, result);
+                self.pop();
+                Ok(op.result(0).unwrap().into())
+            }
             Len { target, span, .. } => {
                 let target_value = target.accept(self)?;
                 let location = self.location(*span);
@@ -632,9 +674,7 @@ impl<'ast, 'ctx, 'blk> ast::Visitor<TypedExpression<'ast, 'ctx>> for SpecCodegen
                 self.top_mut().append_operation_with_result(op)
             }
             Old {
-                expression,
-                span,
-                meta,
+                expression, span, ..
             } => {
                 let value = expression.accept(self)?;
                 let op = verif::old(self.builder(), self.location(*span), value);

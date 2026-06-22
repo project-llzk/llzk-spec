@@ -4,20 +4,25 @@ use ::melior::ir::Block;
 use llzk::{
     builder::{OpBuilder, OpBuilderLike},
     dialect::{
-        cast, function,
+        array, cast, function,
         poly::{self, unifiable_cast},
         r#struct,
     },
     prelude::{
-        FlatSymbolRefAttribute, FuncDefOp, FuncDefOpLike as _, FuncDefOpRef, FunctionType,
-        LlzkContext, MemberDefOpLike as _, OperationLike as _, StringAttribute,
-        StructDefOpLike as _, StructDefOpRef, SymbolRefAttribute, TemplateOpLike as _,
-        TemplateOpRef, TemplateSymbolBindingOpLike as _, is_felt_type, melior_dialects::scf,
+        ArrayType, FlatSymbolRefAttribute, FuncDefOp, FuncDefOpLike as _, FuncDefOpRef,
+        FunctionType, IntegerAttribute, LlzkContext, MemberDefOpLike as _, OperationLike as _,
+        StringAttribute, StructDefOpLike as _, StructDefOpRef, SymbolRefAttribute,
+        TemplateOpLike as _, TemplateOpRef, TemplateSymbolBindingOpLike as _, is_felt_type,
+        melior_dialects::scf,
     },
+    value_ext::{OwningValueRange, ValueRange},
 };
-use melior::ir::{
-    BlockLike as _, BlockRef, Location, Module, OperationRef, Region, RegionLike as _, Type,
-    TypeLike, Value, ValueLike,
+use melior::{
+    dialect::arith,
+    ir::{
+        BlockLike as _, BlockRef, Location, Module, OperationRef, Region, RegionLike as _, Type,
+        TypeLike, Value, ValueLike,
+    },
 };
 
 use crate::{
@@ -27,6 +32,7 @@ use crate::{
         llzk::LlzkContractTarget,
         verif::{
             SpecCodegen, TypedExpression, TypedIdentifier, TypedPredicateDecl,
+            affine::{AffineExpr, AffineMap},
             scope::{CodegenScope, ScopeData, ScopeTag},
         },
     },
@@ -507,6 +513,69 @@ impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
         };
 
         self.top_mut().append_operation_with_result(op)
+    }
+
+    /// Returns a constant index operation.
+    pub fn constant_index_op(
+        &mut self,
+        location: Location<'ctx>,
+        value: i64,
+    ) -> Result<Value<'ctx, 'blk>, CompileError> {
+        let op = arith::constant(
+            self.context(),
+            IntegerAttribute::new(Type::index(self.context()), value).into(),
+            location,
+        );
+        self.top_mut().append_operation_with_result(op)
+    }
+
+    /// Creates IR that fills an array of felts with values from the range between the two expressions.
+    ///
+    /// Return a value pointing to the array.
+    pub fn fill_array_with_range(
+        &mut self,
+        location: Location<'ctx>,
+        from: Value<'ctx, 'blk>,
+        to: Value<'ctx, 'blk>,
+    ) -> Result<Value<'ctx, 'blk>, CompileError> {
+        // Create an affine map that computes `to` - `from` to get the size of the array.
+        let s0 = AffineExpr::symbol(self.context(), 0);
+        let s1 = AffineExpr::symbol(self.context(), 1);
+        let map = AffineMap::new(self.context(), 0, 2, &[s1 - s0]);
+        let arr_type = ArrayType::new(self.felt_type(), &[map.into()]);
+        let from_index = self.cast_if_necessary(from, Type::index(self.context()), location)?;
+        let to_index = self.cast_if_necessary(to, Type::index(self.context()), location)?;
+        let range = OwningValueRange::from([from_index, to_index].as_slice());
+        let arr = array::new(
+            self.builder(),
+            location,
+            arr_type,
+            array::ArrayCtor::MapDimSlice(&[(&range).try_into().unwrap()], &[0]),
+        );
+        let arr = self.top_mut().append_operation_with_result(arr)?;
+        let region = Region::new();
+        let block = region.append_block(Block::new(&[(Type::index(self.context()), location)]));
+        self.push(block);
+        {
+            // %felt_iv = cast.tofelt %iv
+            // %arr[%iv - %from_index] = %felt_iv
+            let iv = block.argument(0).unwrap();
+            let idx = self.top_mut().append_operation_with_result(arith::subi(
+                iv.into(),
+                from_index,
+                location,
+            ))?;
+            let felt_iv = self.cast_if_necessary(iv.into(), self.felt_type(), location)?;
+            self.top_mut()
+                .append_operation(array::write(location, arr, &[idx], felt_iv));
+            self.top_mut().append_operation(scf::r#yield(&[], location));
+        }
+        self.pop();
+        let const_one = self.constant_index_op(location, 1)?;
+        self.top_mut().append_operation(scf::r#for(
+            from_index, to_index, const_one, region, location,
+        ));
+        Ok(arr)
     }
 }
 
