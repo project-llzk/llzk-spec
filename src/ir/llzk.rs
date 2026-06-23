@@ -22,13 +22,13 @@ use llzk::prelude::{
     FuncDefOpRef, FuncDefOpRefMut, OperationMutLike, PodType, StructDefOpRef, SymbolRefAttribute,
     TemplateOpLike, TemplateOpRef, TemplateSymbolBindingOpLike as _,
 };
+use llzk_sys::llzkFunction_FuncDefOpGetArgNameAttr;
+use melior::ir::{BlockLike as _, TypeLike as _, ValueLike};
 use melior::ir::{
     Module, OperationRef, Type,
-    attribute::FlatSymbolRefAttribute,
-    attribute::StringAttribute,
+    attribute::{Attribute, FlatSymbolRefAttribute, StringAttribute},
     operation::{OperationLike, WalkOrder, WalkResult},
 };
-use melior::ir::{TypeLike as _, ValueLike};
 use mlir_sys::mlirOperationGetParentOperation;
 use std::collections::{HashMap, HashSet};
 
@@ -163,11 +163,7 @@ impl<'ctx, 'op> ContractTargetInfo<'ctx> for LlzkContractTarget<'ctx, 'op> {
 
     fn inputs(&self) -> impl Iterator<Item = InputInfo<'ctx, Type<'ctx>>> {
         let (f, source_offset) = match self {
-            Self::Struct(op) => op
-                .constrain_func()
-                .map(|func| (func, 1))
-                .or_else(|| op.compute_func().map(|func| (func, 0)))
-                .unwrap(),
+            Self::Struct(op) => preferred_struct_input_func(*op).unwrap(),
             Self::Function(op) => (*op, 0),
         };
         let arg_count = f
@@ -462,8 +458,6 @@ fn extract_metadata(
             if is_func_def(&operation)
                 && let Some(function_name) = string_attribute(&operation, "sym_name")
             {
-                // TODO: Once we add `function.arg_name` attributes, we will collect
-                // those here as well.
                 let target = function_contract_target_name(&operation, &function_name);
                 metadata.global_symbols.insert(target.clone());
                 // Function may already be visible if it is a struct method, hence the check
@@ -655,12 +649,27 @@ fn collect_function_contract_metadata<'c: 'a, 'a>(
     metadata
 }
 
+/// Returns the struct entrypoint whose arguments should be exposed to specs.
+///
+/// Struct contracts prefer `constrain` when present because it carries the
+/// concrete runtime inputs plus the leading struct operand. Product-only structs
+/// expose the `product` inputs directly. As a final fallback, `compute` inputs
+/// are used.
+pub(crate) fn preferred_struct_input_func<'c: 'a, 'a>(
+    struct_op: StructDefOpRef<'c, 'a>,
+) -> Option<(FuncDefOpRef<'c, 'a>, usize)> {
+    struct_op
+        .constrain_func()
+        .map(|func| (func, 1))
+        .or_else(|| find_struct_function(struct_op, "product").map(|func| (func, 0)))
+        .or_else(|| struct_op.compute_func().map(|func| (func, 0)))
+}
+
 /// Collects every spec-visible input name exported by the given callable target.
 ///
-/// Free functions contribute all named inputs. Struct targets merge names from
-/// `compute` and `constrain`, skipping the leading `self`-like struct operand on
-/// `constrain` because that value is exposed to specs through member bindings
-/// rather than as a user-written input symbol.
+/// Free functions contribute all named inputs. Struct targets contribute the
+/// names from the same preferred entrypoint used for contract lowering, skipping
+/// any leading struct operand.
 fn collect_function_input_names<'c: 'a, 'a>(
     operation: &impl OperationLike<'c, 'a>,
 ) -> HashSet<String> {
@@ -683,15 +692,12 @@ fn collect_function_input_names<'c: 'a, 'a>(
     }
 
     if let Some(struct_op) = StructDefOpRef::from_option_raw(operation.to_raw()) {
-        if let Some(func) = struct_op.compute_func() {
-            collect(func, &mut names);
-        }
-        if let Some(func) = struct_op.constrain_func() {
+        if let Some((func, source_offset)) = preferred_struct_input_func(struct_op) {
             let arg_count = func
                 .function_type()
                 .map(|t| t.input_count())
                 .unwrap_or_default();
-            for n in 1..arg_count {
+            for n in source_offset..arg_count {
                 if let Some(name) = function_input_name(func, n) {
                     names.insert(name);
                 }
@@ -711,9 +717,26 @@ pub(crate) fn function_input_name<'c, 'a>(
     func: FuncDefOpRef<'c, 'a>,
     idx: usize,
 ) -> Option<String> {
-    func.argument_attr(idx, "function.arg_name")
-        .and_then(|a| Ok(StringAttribute::try_from(a)?.value().to_string()))
-        .ok()
+    unsafe {
+        Attribute::from_option_raw(llzkFunction_FuncDefOpGetArgNameAttr(
+            func.to_raw(),
+            idx as u32,
+        ))
+    }
+    .and_then(|a| StringAttribute::try_from(a).ok())
+    .map(|a| a.value().to_string())
+}
+
+fn find_struct_function<'c: 'a, 'a>(
+    struct_op: StructDefOpRef<'c, 'a>,
+    name: &str,
+) -> Option<FuncDefOpRef<'c, 'a>> {
+    std::iter::successors(struct_op.body().first_operation(), |op| op.next_in_block()).find_map(
+        |op| {
+            let func = FuncDefOpRef::from_option_raw(op.to_raw())?;
+            (string_attribute(&func, "sym_name").as_deref() == Some(name)).then_some(func)
+        },
+    )
 }
 
 /// Collect member reference paths to populate `member_paths`, using `root` as

@@ -378,10 +378,6 @@ impl<'a> Verifier<'a> {
                 }
                 self.verify_expression(expression, scopes, context);
             }
-            // TODO: `arg[N]` is a temporary workaround for unnamed function arguments.
-            // Once a solution for referencing arguments using source-language naming
-            // is implemented in llzk-lib, we will default to resolving arguments in
-            // that way and use the `arg` lookup only as a backup.
             Expression::Arg { .. } => {}
             Expression::Symbol(identifier) => {
                 if !self.name_visible(

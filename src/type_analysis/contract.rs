@@ -88,15 +88,21 @@ where
         // Fill the scope with input arguments as parameters (with the param number)
         for (n, t) in info.inputs().enumerate() {
             inputs.push(t.r#type.clone());
-            let name = t
-                .name
-                .map(Cow::Borrowed)
-                .unwrap_or_else(|| Cow::Owned(format!("$arg[{n}]")));
-            let name = self.ident(&name, decl);
+            let positional_name = self.ident(&format!("$arg[{n}]"), decl);
             diags.extract_type_result(
-                self.ctx.scope().top().bind_parameter(&name, t.r#type, n),
+                self.ctx
+                    .scope()
+                    .top()
+                    .bind_parameter(&positional_name, t.r#type.clone(), n),
                 || format!("while binding input #{n}"),
             );
+            if let Some(name) = t.name {
+                let name = self.ident(name, decl);
+                diags.extract_type_result(
+                    self.ctx.scope().top().bind_local(&name, t.r#type),
+                    || format!("while binding named input '{}'", name.value()),
+                );
+            }
         }
         // Fill the scope with outputs in declaration order. These must be done after the inputs s.t. they
         // are in the correct order in the `inputs` vector.

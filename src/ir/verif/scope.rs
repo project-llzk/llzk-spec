@@ -94,6 +94,7 @@ impl<'ctx, 'blk> ScopeData<'ctx, 'blk> {
         }
     }
 
+    #[allow(unused)]
     pub fn block(&self) -> BlockRef<'ctx, 'blk> {
         self.block
     }

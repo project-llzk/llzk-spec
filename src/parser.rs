@@ -322,8 +322,7 @@ impl<'a, 'ctx> Lowerer<'a, 'ctx> {
         })
     }
 
-    /// Lowers `arg[N]`, a reference to an unnamed function argument (i.e., does
-    /// not have the `function.arg_name` attribute).
+    /// Lowers `arg[N]`, a positional reference to a contract input argument.
     fn arg_ref(&self, pair: Pair<'a, Rule>) -> Result<Expression<'ctx>, Diagnostic> {
         let span = self.span(pair.as_span());
         let index_pair = pair.into_inner().next().expect("arg index");

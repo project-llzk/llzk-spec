@@ -20,7 +20,7 @@ use crate::{
     diagnostic::CompileError,
     ir::{
         Context, MlirTypeSystem,
-        llzk::{LlzkContractTarget, LlzkInfo},
+        llzk::{LlzkContractTarget, LlzkInfo, preferred_struct_input_func},
         verif::{
             helpers::{accept_in_new_scope, find_contract_target_on_module},
             scope::{CodegenScopeStack, ScopeData, ScopeTag},
@@ -167,10 +167,8 @@ impl<'ast, 'ctx, 'blk> ast::Visitor<TypedContractDecl<'ast, 'ctx>>
                 // Bind the members as `struct.readm` operations reading from argument #0
                 self.bind_members(target_op, location, Value::from(block.argument(0)?), decl)?;
                 // Bind the inputs from the rest of the contract arguments.
-                if let Some(constrain) = target_op.constrain_func() {
-                    self.bind_inputs(constrain, block, Some(1), Some(1), decl)?;
-                } else if let Some(compute) = target_op.compute_func() {
-                    self.bind_inputs(compute, block, Some(0), Some(1), decl)?;
+                if let Some((entrypoint, source_offset)) = preferred_struct_input_func(target_op) {
+                    self.bind_inputs(entrypoint, block, Some(source_offset), Some(1), decl)?;
                 } else {
                     unreachable!("verified struct contract target must have a callable entrypoint");
                 }

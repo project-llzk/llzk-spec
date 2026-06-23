@@ -38,9 +38,10 @@ template-generated or nested IR, authors use fully qualified LLZK names such as
 `IsZero::IsZero`, `Num2Bits::Num2Bits`, or `tmpl::empty`.
 
 Inside a contract, bare names are resolved against the symbols visible from that
-target. This includes public members, visible template parameters, visible
-named LLZK inputs from `function.arg_name`, visible `poly.expr` names, and
-local bindings introduced by the spec.
+target. This includes public members, visible template parameters, LLZK inputs
+that carry `function.arg_name`, visible `poly.expr` names, and local bindings
+introduced by the spec. Contract inputs are also always addressable
+positionally with `arg[N]`.
 
 ## Requirements And Ensures
 
@@ -141,7 +142,7 @@ Names resolve from most local to least local:
 LLZK symbols are the source of truth. If a source language renames or specializes
 constructs during compilation, the spec must use the LLZK-visible name.
 
-Unnamed function arguments can be referenced with `arg[N]`:
+Contract inputs can always be referenced with `arg[N]`:
 
 ```spec
 contract for IsZero::IsZero {
@@ -149,8 +150,8 @@ contract for IsZero::IsZero {
 }
 ```
 
-`arg[N]` is a workaround since LLZK currently does not assign symbol names to function arguments,
-but will be addressed in a future LLZK release.
+If the LLZK IR also carries `function.arg_name`, that same input may be
+referenced by its bare name as well.
 
 ## Members And Visibility
 

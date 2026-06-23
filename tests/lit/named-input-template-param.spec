@@ -5,14 +5,14 @@
 contract for Num2Bits::Num2Bits {
   require n == n;
   let copy = in;
-  let same = copy;
+  let same = arg[0];
   ensure true;
 }
 
 contract for LessThanPower::LessThanPower {
   require base == base;
   let res = in;
-  let same = res;
+  let same = arg[0];
   ensure true;
 }
 
@@ -20,6 +20,7 @@ contract for LessThanPower::LessThanPower {
 // CHECK-DAG: "name": "LessThanPower::LessThanPower"
 // CHECK-DAG: "kind": "require"
 // CHECK-DAG: "kind": "let"
+// CHECK-DAG: "kind": "arg"
 // CHECK-DAG: "kind": "boolean"
 // CHECK-DAG: "name": "n"
 // CHECK-DAG: "name": "base"

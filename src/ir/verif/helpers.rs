@@ -438,22 +438,32 @@ impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
         (0..arg_count).try_for_each(|n| -> Result<(), CompileError> {
             let arg = Value::from(block.argument(n + block_offset)?);
             let source_idx = n + source_offset;
-
-            let name = match function_input_name(func, source_idx) {
-                Some(arg_name) => self.create_ident(&arg_name, span),
-                None => self.create_ident(&format!("$arg[{n}]"), span),
-            };
-
+            let positional_name = self.create_ident(&format!("$arg[{n}]"), span);
             self.scope
                 .top()
-                .bind_parameter(&name, arg, n)
+                .bind_parameter(&positional_name, arg, n)
                 .map_err(|err| {
                     err.into_compile_error(
                         &self.filename,
                         Some(span.span()),
                         format!("while binding argument #{n} of target"),
                     )
-                })
+                })?;
+
+            if let Some(arg_name) = function_input_name(func, source_idx) {
+                let arg_name_ident = self.create_ident(&arg_name, span);
+                self.top_mut()
+                    .bind_local(&arg_name_ident, arg)
+                    .map_err(|err| {
+                        err.into_compile_error(
+                            &self.filename,
+                            Some(span.span()),
+                            format!("while binding named argument '{arg_name}' of target"),
+                        )
+                    })?;
+            }
+
+            Ok(())
         })
     }
 
