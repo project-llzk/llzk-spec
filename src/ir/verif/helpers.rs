@@ -10,13 +10,13 @@ use llzk::{
         verif::{ContractOpLike, ContractOpRef},
     },
     prelude::{
-        ArrayType, FlatSymbolRefAttribute, FuncDefOp, FuncDefOpLike as _, FuncDefOpRef,
-        FunctionType, IntegerAttribute, LlzkContext, MemberDefOpLike as _, OperationLike as _,
-        StringAttribute, StructDefOpLike as _, StructDefOpRef, SymbolRefAttribute,
-        TemplateOpLike as _, TemplateOpRef, TemplateSymbolBindingOpLike as _, is_felt_type,
-        melior_dialects::scf,
+        ArrayType, AttributeLike as _, FlatSymbolRefAttribute, FuncDefOp, FuncDefOpLike as _,
+        FuncDefOpRef, FunctionType, IntegerAttribute, LlzkContext, MemberDefOpLike as _,
+        OperationLike as _, StringAttribute, StructDefOpLike as _, StructDefOpRef,
+        SymbolRefAttribute, TemplateOpLike as _, TemplateOpRef, TemplateSymbolBindingOpLike as _,
+        is_felt_type, melior_dialects::scf,
     },
-    value_ext::{OwningValueRange, ValueRange},
+    value_ext::OwningValueRange,
 };
 use melior::{
     dialect::arith,
@@ -342,11 +342,9 @@ impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
                 .into_iter()
                 .try_for_each(|param_op| {
                     let symbol = param_op.sym_name();
-                    let read_value = self.insert_op_with_result(poly::read_const(
-                        location,
-                        symbol,
-                        param_op.type_opt().unwrap(),
-                    ))?;
+                    let param_type = param_op.type_opt().unwrap_or_else(|| self.felt_type());
+                    let read_value =
+                        self.insert_op_with_result(poly::read_const(location, symbol, param_type))?;
                     let name = self.create_ident(symbol, span);
                     self.scope
                         .top()

@@ -9,7 +9,7 @@ use crate::diagnostic::CompileError;
 use crate::ir::MlirTypeSystem;
 use crate::type_analysis::loops::{LoopInfo, LoopLabel};
 use crate::type_analysis::{
-    CircuitInfo, ContractTargetInfo, InputInfo, MemberInfo, OutputInfo, ParamInfo, TypeSystem,
+    CircuitInfo, ContractTargetInfo, InputInfo, MemberInfo, OutputInfo, ParamInfo,
 };
 use llzk::dialect::{
     array::ArrayType,

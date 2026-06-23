@@ -95,19 +95,11 @@
         "rust-overlay": "rust-overlay"
       },
       "locked": {
-<<<<<<< HEAD
         "lastModified": 1781869761,
         "narHash": "sha256-4oTfKKqg/AeNwm7stxUC9qCpiPHwisL+UNjsxjmzmjA=",
         "owner": "project-llzk",
         "repo": "llzk-rs",
         "rev": "969b93cfdb048fd18251c416cc986e4a1f932730",
-=======
-        "lastModified": 1781713000,
-        "narHash": "sha256-lZVZyatd795kU3R5dh0zE//SJ1sUrDhXNqe5MXoBAAU=",
-        "owner": "project-llzk",
-        "repo": "llzk-rs",
-        "rev": "dcf91286b28d696ef6e74960dbc52da7e327c903",
->>>>>>> b795c81 (Add support for `function.arg_name`)
         "type": "github"
       },
       "original": {
@@ -233,19 +225,11 @@
         ]
       },
       "locked": {
-<<<<<<< HEAD
         "lastModified": 1781850613,
         "narHash": "sha256-UL/f++6fbg1MSC63NSynUVsww+DSay0N5TsbFzLZIsQ=",
         "owner": "oxalica",
         "repo": "rust-overlay",
         "rev": "4baecb43a008cd004e5220a777e1724bd8d43e43",
-=======
-        "lastModified": 1780543271,
-        "narHash": "sha256-oPJ7eJN1sM37v92Rp/eyQL7/rUm0BOvXEBAoq/zN0cM=",
-        "owner": "oxalica",
-        "repo": "rust-overlay",
-        "rev": "c30ca201c5093540cf792f6982f81ba1aa0f3514",
->>>>>>> b795c81 (Add support for `function.arg_name`)
         "type": "github"
       },
       "original": {
