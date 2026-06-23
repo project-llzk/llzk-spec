@@ -153,7 +153,6 @@ where
             .from_other_result(self.info.find_contract_target(decl.target()), |err| {
                 format!("in contract declaration: {err}")
             })?;
-
         let inputs = self.push_and_bind(decl, target_info, &mut diags);
         let mut block_tc = BlockTypeChecker::new(self.source_name, self.ctx, Self::block_cfg());
         let body = diags.extract_result(decl.body().accept(&mut block_tc));

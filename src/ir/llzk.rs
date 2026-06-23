@@ -179,7 +179,6 @@ impl<'ctx, 'op> ContractTargetInfo<'ctx> for LlzkContractTarget<'ctx, 'op> {
                 .and_then(|a| Ok(StringAttribute::try_from(a)?.value()))
                 .ok();
             let t = unsafe { Type::from_raw(f.argument(n).unwrap().r#type().to_raw()) };
-
             match name {
                 Some(name) => InputInfo::named(name, t),
                 None => InputInfo::unnamed(t),

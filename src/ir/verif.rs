@@ -151,13 +151,7 @@ impl<'ast, 'ctx, 'blk> ast::Visitor<TypedContractDecl<'ast, 'ctx>>
                 target.fully_qualified_name()
             ))
         })?;
-        // Push into the parent block, this is where we will insert the contract op.
-        self.push(target.block().ok_or_else(|| {
-            CompileError::Ir(format!(
-                "expected target '{}' to be contained in a block",
-                target.fully_qualified_name()
-            ))
-        })?);
+
         // Create a function def op pretending to be the contract for now.
         let block = verif::contract(
             self.builder(),
@@ -192,8 +186,6 @@ impl<'ast, 'ctx, 'blk> ast::Visitor<TypedContractDecl<'ast, 'ctx>>
         self.bind_loop_info(target, decl)?;
 
         decl.body().accept(self)?;
-        // We pop twice: the body of the contract and the parent of the target.
-        self.pop();
         self.pop();
         Ok(())
     }
@@ -271,7 +263,7 @@ impl<'ast, 'ctx> ast::Visitor<TypedStatement<'ast, 'ctx>> for SpecCodegen<'ast, 
                         block.append_operation(scf::r#yield(&[], self.location(*span)));
                     }
                     let op = scf::execute_region(&[], region, self.location(*span));
-                    self.top_mut().append_operation(op);
+                    self.insert_op(op);
                     Ok(())
                 }
             },
@@ -285,7 +277,7 @@ impl<'ast, 'ctx> ast::Visitor<TypedStatement<'ast, 'ctx>> for SpecCodegen<'ast, 
                     block_ref.append_operation(scf::r#yield(&[], self.location(block.span())));
                 }
                 let op = scf::execute_region(&[], region, self.location(block.span()));
-                self.top_mut().append_operation(op);
+                self.insert_op(op);
                 Ok(())
             }
             Require { expression, span } => match self.closest_tag() {
@@ -445,7 +437,7 @@ impl<'ast, 'ctx, 'blk> ast::Visitor<TypedExpression<'ast, 'ctx>> for SpecCodegen
                 assert_eq!(then_result.r#type(), else_result.r#type());
 
                 let op = scf::r#if(condition, &[*meta], then_region, else_region, location);
-                self.top_mut().append_operation_with_result(op)
+                self.insert_op_with_result(op)
             }
             Binary {
                 op,
@@ -587,12 +579,7 @@ impl<'ast, 'ctx, 'blk> ast::Visitor<TypedExpression<'ast, 'ctx>> for SpecCodegen
                     )?;
                     self.insert_op_with_result(op)
                 } else if PodType::try_from(target_value.r#type()).is_ok() {
-                    let op = pod::read(
-                        location,
-                        target_value,
-                        FlatSymbolRefAttribute::new(self.context(), member.value()),
-                        *meta,
-                    );
+                    let op = pod::read(location, target_value, member.value(), *meta);
                     self.insert_op_with_result(op)
                 } else {
                     Err(CompileError::Ir(format!(

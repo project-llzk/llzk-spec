@@ -150,10 +150,10 @@ impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
     ///
     /// Sets the insertion point of the builder to the end of the block on the new top.
     pub fn pop(&mut self) {
-        self.scope.pop();
         if let Some(previous) = self.scope.top().payload().previous() {
             self.builder().restore_insertion_point(previous);
         }
+        self.scope.pop();
     }
 
     /// Returns the tag closest to the top of the stack.
