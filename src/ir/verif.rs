@@ -167,16 +167,17 @@ impl<'ast, 'ctx, 'blk> ast::Visitor<TypedContractDecl<'ast, 'ctx>>
                 // Bind the members as `struct.readm` operations reading from argument #0
                 self.bind_members(target_op, location, Value::from(block.argument(0)?), decl)?;
                 // Bind the inputs from the rest of the contract arguments.
-                let source_offset = target_op
-                    .constrain_func()
-                    .map(|_| 1)
-                    .or_else(|| target_op.compute_func().map(|_| 0))
-                    .unwrap();
-                self.bind_contract_inputs(contract, block, Some(source_offset), Some(1), decl)?;
+                if let Some(constrain) = target_op.constrain_func() {
+                    self.bind_inputs(constrain, block, Some(1), Some(1), decl)?;
+                } else if let Some(compute) = target_op.compute_func() {
+                    self.bind_inputs(compute, block, Some(0), Some(1), decl)?;
+                } else {
+                    unreachable!("verified struct contract target must have a callable entrypoint");
+                }
             }
             LlzkContractTarget::Function(target_op) => {
                 // Bind the inputs (the first N arguments of the contract)
-                self.bind_contract_inputs(contract, block, None, None, decl)?;
+                self.bind_inputs(target_op, block, None, None, decl)?;
                 // Bind the outputs (the rest of the arguments of the contract)
                 self.bind_outputs(
                     target_op,
