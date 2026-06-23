@@ -337,16 +337,20 @@ impl<'ast, 'ctx> ast::Visitor<TypedStatement<'ast, 'ctx>> for SpecCodegen<'ast, 
             }
             Increases { expression, span } => match self.closest_tag() {
                 ScopeTag::Invariant => {
+                    let location = self.location(*span);
                     let value = expression.accept(self)?;
-                    verif::increases(self.builder(), self.location(*span), value);
+                    let value = self.cast_if_necessary(value, self.ctx.felt_type(), location)?;
+                    verif::increases(self.builder(), location, value);
                     Ok(())
                 }
                 _ => stmt_not_allowed!("increases", "predicates"),
             },
             Decreases { expression, span } => match self.closest_tag() {
                 ScopeTag::Invariant => {
+                    let location = self.location(*span);
                     let value = expression.accept(self)?;
-                    verif::decreases(self.builder(), self.location(*span), value);
+                    let value = self.cast_if_necessary(value, self.ctx.felt_type(), location)?;
+                    verif::decreases(self.builder(), location, value);
                     Ok(())
                 }
                 _ => stmt_not_allowed!("decreases", "predicates"),
@@ -522,7 +526,7 @@ impl<'ast, 'ctx, 'blk> ast::Visitor<TypedExpression<'ast, 'ctx>> for SpecCodegen
                         felt::pow(location, lhs, rhs)?
                     }
                 };
-                let value = self.top_mut().append_operation_with_result(op)?;
+                let value = self.insert_op_with_result(op)?;
                 assert_eq!(*meta, value.r#type());
                 Ok(value)
             }
@@ -536,7 +540,7 @@ impl<'ast, 'ctx, 'blk> ast::Visitor<TypedExpression<'ast, 'ctx>> for SpecCodegen
                         felt::neg(location, value)?
                     }
                 };
-                let value = self.top_mut().append_operation_with_result(op)?;
+                let value = self.insert_op_with_result(op)?;
                 assert_eq!(*meta, value.r#type());
                 Ok(value)
             }
@@ -557,14 +561,13 @@ impl<'ast, 'ctx, 'blk> ast::Visitor<TypedExpression<'ast, 'ctx>> for SpecCodegen
                         target_value.r#type()
                     )));
                 };
-                self.top_mut()
-                    .append_operation_with_result(if arr_type.dims().len() > 1 {
-                        array::extract
-                    } else {
-                        array::read
-                    }(
-                        location, *meta, target_value, &[index_value]
-                    ))
+                self.insert_op_with_result(if arr_type.dims().len() > 1 {
+                    array::extract
+                } else {
+                    array::read
+                }(
+                    location, *meta, target_value, &[index_value]
+                ))
             }
             Member {
                 target,
@@ -582,7 +585,7 @@ impl<'ast, 'ctx, 'blk> ast::Visitor<TypedExpression<'ast, 'ctx>> for SpecCodegen
                         target_value,
                         member.value(),
                     )?;
-                    self.top_mut().append_operation_with_result(op)
+                    self.insert_op_with_result(op)
                 } else if PodType::try_from(target_value.r#type()).is_ok() {
                     let op = pod::read(
                         location,
@@ -590,7 +593,7 @@ impl<'ast, 'ctx, 'blk> ast::Visitor<TypedExpression<'ast, 'ctx>> for SpecCodegen
                         FlatSymbolRefAttribute::new(self.context(), member.value()),
                         *meta,
                     );
-                    self.top_mut().append_operation_with_result(op)
+                    self.insert_op_with_result(op)
                 } else {
                     Err(CompileError::Ir(format!(
                         "was expecting either a struct or pod type but got {}",
@@ -610,7 +613,7 @@ impl<'ast, 'ctx, 'blk> ast::Visitor<TypedExpression<'ast, 'ctx>> for SpecCodegen
                     &args,
                     slice::from_ref(meta),
                 )?;
-                self.top_mut().append_operation_with_result(op)
+                self.insert_op_with_result(op)
             }
             Quantifier {
                 quantifier_kind,
@@ -669,9 +672,9 @@ impl<'ast, 'ctx, 'blk> ast::Visitor<TypedExpression<'ast, 'ctx>> for SpecCodegen
                     IntegerAttribute::new(self.ctx.index_type(), 0).into(),
                     location,
                 );
-                let dim = self.top_mut().append_operation_with_result(op)?;
+                let dim = self.insert_op_with_result(op)?;
                 let op = array::len(location, target_value, dim);
-                self.top_mut().append_operation_with_result(op)
+                self.insert_op_with_result(op)
             }
             Old {
                 expression, span, ..
@@ -683,16 +686,14 @@ impl<'ast, 'ctx, 'blk> ast::Visitor<TypedExpression<'ast, 'ctx>> for SpecCodegen
             Arg { index, span, .. } => self.scope.find_parameter(index).copied().map_err(|err| {
                 err.into_compile_error(&self.filename, Some(*span), format!("on argument #{index}"))
             }),
-            Nondet { meta, .. } => self
-                .top_mut()
-                .append_operation_with_result(nondet(location, *meta)),
+            Nondet { meta, .. } => self.insert_op_with_result(nondet(location, *meta)),
             Boolean { value, meta, .. } => {
                 let op = arith::constant(
                     self.context(),
                     IntegerAttribute::new(*meta, (*value).into()).into(),
                     location,
                 );
-                self.top_mut().append_operation_with_result(op)
+                self.insert_op_with_result(op)
             }
             Number { value, meta, .. } => {
                 assert_eq!(*meta, self.felt_type());
@@ -701,8 +702,7 @@ impl<'ast, 'ctx, 'blk> ast::Visitor<TypedExpression<'ast, 'ctx>> for SpecCodegen
                     value.value(),
                     self.ctx.prime(),
                 );
-                self.top_mut()
-                    .append_operation_with_result(felt::constant(location, value)?)
+                self.insert_op_with_result(felt::constant(location, value)?)
             }
             Symbol(symbol) => self.find_symbol(symbol),
         }
