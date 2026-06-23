@@ -655,6 +655,12 @@ fn collect_function_contract_metadata<'c: 'a, 'a>(
     metadata
 }
 
+/// Collects every spec-visible input name exported by the given callable target.
+///
+/// Free functions contribute all named inputs. Struct targets merge names from
+/// `compute` and `constrain`, skipping the leading `self`-like struct operand on
+/// `constrain` because that value is exposed to specs through member bindings
+/// rather than as a user-written input symbol.
 fn collect_function_input_names<'c: 'a, 'a>(
     operation: &impl OperationLike<'c, 'a>,
 ) -> HashSet<String> {
@@ -696,6 +702,11 @@ fn collect_function_input_names<'c: 'a, 'a>(
     names
 }
 
+/// Returns the user-facing name for a function input, if the IR exposes one.
+///
+/// Unnamed arguments remain addressable through spec-side `arg[N]` syntax, so
+/// this only reports names backed by the canonical `function.arg_name`
+/// attribute.
 pub(crate) fn function_input_name<'c, 'a>(
     func: FuncDefOpRef<'c, 'a>,
     idx: usize,
@@ -703,92 +714,6 @@ pub(crate) fn function_input_name<'c, 'a>(
     func.argument_attr(idx, "function.arg_name")
         .and_then(|a| Ok(StringAttribute::try_from(a)?.value().to_string()))
         .ok()
-        .or_else(|| {
-            fallback_function_input_names(func)
-                .get(idx)
-                .cloned()
-                .flatten()
-        })
-}
-
-fn fallback_function_input_names<'c, 'a>(func: FuncDefOpRef<'c, 'a>) -> Vec<Option<String>> {
-    let text = func.to_string();
-    let Some(open_idx) = text.find('(') else {
-        return vec![];
-    };
-
-    let mut close_idx = None;
-    let mut angle = 0usize;
-    let mut brace = 0usize;
-    let mut bracket = 0usize;
-    let mut paren = 0usize;
-    let mut in_string = false;
-
-    for (i, ch) in text.char_indices().skip_while(|(i, _)| *i < open_idx) {
-        match ch {
-            '"' => in_string = !in_string,
-            _ if in_string => {}
-            '(' => paren += 1,
-            ')' => {
-                paren = paren.saturating_sub(1);
-                if paren == 0 {
-                    close_idx = Some(i);
-                    break;
-                }
-            }
-            '<' => angle += 1,
-            '>' => angle = angle.saturating_sub(1),
-            '{' => brace += 1,
-            '}' => brace = brace.saturating_sub(1),
-            '[' => bracket += 1,
-            ']' => bracket = bracket.saturating_sub(1),
-            _ => {}
-        }
-    }
-
-    let Some(close_idx) = close_idx else {
-        return vec![];
-    };
-    let args = &text[(open_idx + 1)..close_idx];
-    let mut result = Vec::new();
-    let mut start = 0usize;
-    angle = 0;
-    brace = 0;
-    bracket = 0;
-    paren = 0;
-    in_string = false;
-
-    for (i, ch) in args.char_indices() {
-        match ch {
-            '"' => in_string = !in_string,
-            _ if in_string => {}
-            '(' => paren += 1,
-            ')' => paren = paren.saturating_sub(1),
-            '<' => angle += 1,
-            '>' => angle = angle.saturating_sub(1),
-            '{' => brace += 1,
-            '}' => brace = brace.saturating_sub(1),
-            '[' => bracket += 1,
-            ']' => bracket = bracket.saturating_sub(1),
-            ',' if angle == 0 && brace == 0 && bracket == 0 && paren == 0 => {
-                result.push(parse_arg_name(&args[start..i]));
-                start = i + 1;
-            }
-            _ => {}
-        }
-    }
-    if start < args.len() {
-        result.push(parse_arg_name(&args[start..]));
-    }
-    result
-}
-
-fn parse_arg_name(arg: &str) -> Option<String> {
-    let marker = "function.arg_name = \"";
-    let start = arg.find(marker)? + marker.len();
-    let rest = &arg[start..];
-    let end = rest.find('"')?;
-    Some(rest[..end].to_string())
 }
 
 /// Collect member reference paths to populate `member_paths`, using `root` as
