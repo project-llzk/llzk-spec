@@ -21,21 +21,23 @@ use llzk::{
         r#struct,
     },
     prelude::{
-        ArrayType, FlatSymbolRefAttribute, FuncDefOp, FuncDefOpLike as _, FuncDefOpRef,
-        FunctionType, IntegerAttribute, LlzkContext, MemberDefOpLike as _, OperationLike as _,
-        StringAttribute, StructDefOpLike as _, StructDefOpRef, SymbolRefAttribute,
-        TemplateOpLike as _, TemplateOpRef, TemplateSymbolBindingOpLike as _, is_felt_type,
-        melior_dialects::scf,
+        ArrayType, ContractOpLike as _, ContractOpRef, FlatSymbolRefAttribute, FuncDefOp,
+        FuncDefOpLike as _, FuncDefOpRef, FunctionType, IntegerAttribute, LlzkContext,
+        MemberDefOpLike as _, OperationLike as _, StringAttribute, StructDefOpLike as _,
+        StructDefOpRef, SymbolRefAttribute, TemplateOpLike as _, TemplateOpRef,
+        TemplateSymbolBindingOpLike as _, is_felt_type, melior_dialects::scf,
     },
     value_ext::OwningValueRange,
 };
 use melior::{
+    StringRef,
     dialect::arith,
     ir::{
-        BlockLike as _, BlockRef, Location, Module, Operation, OperationRef, Region,
-        RegionLike as _, Type, TypeLike, Value, ValueLike,
+        AttributeLike as _, BlockLike as _, BlockRef, Location, Module, Operation, OperationRef,
+        Region, RegionLike as _, Type, TypeLike, Value, ValueLike,
     },
 };
+use mlir_sys::mlirDictionaryAttrGetElementByName;
 
 impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
     /// Pushes a block where to emit the body of a predicate.
@@ -467,6 +469,56 @@ impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
         })
     }
 
+    /// Binds block arguments as parameters in the scope based on the metadata in a
+    /// `verif.contract` op.
+    ///
+    /// If given, the block arguments are offset by the `offset` parameter.
+    pub fn bind_contract_inputs(
+        &mut self,
+        contract: ContractOpRef<'ctx, 'blk>,
+        block: BlockRef<'ctx, 'blk>,
+        source_offset: Option<usize>,
+        block_offset: Option<usize>,
+        span: &dyn Spanned,
+    ) -> Result<(), CompileError> {
+        let source_offset = source_offset.unwrap_or_default();
+        let block_offset = block_offset.unwrap_or_default();
+        let arg_count = contract
+            .function_type()?
+            .input_count()
+            .saturating_sub(source_offset);
+        (0..arg_count).try_for_each(|n| -> Result<(), CompileError> {
+            let arg = Value::from(block.argument(n + block_offset)?);
+            let source_idx = n + source_offset;
+            let positional_name = self.create_ident(&format!("$arg[{n}]"), span);
+            self.scope
+                .top()
+                .bind_parameter(&positional_name, arg, n)
+                .map_err(|err| {
+                    err.into_compile_error(
+                        &self.filename,
+                        Some(span.span()),
+                        format!("while binding argument #{n} of target"),
+                    )
+                })?;
+
+            if let Some(arg_name) = contract_input_name(contract, source_idx) {
+                let arg_name_ident = self.create_ident(&arg_name, span);
+                self.top_mut()
+                    .bind_local(&arg_name_ident, arg)
+                    .map_err(|err| {
+                        err.into_compile_error(
+                            &self.filename,
+                            Some(span.span()),
+                            format!("while binding named argument '{arg_name}' of target"),
+                        )
+                    })?;
+            }
+
+            Ok(())
+        })
+    }
+
     /// Binds block arguments as outputs in the scope based on the metadata in the given
     /// reference to a `function.def`.
     ///
@@ -637,6 +689,26 @@ fn func_type_inputs<'ctx>(func_type: FunctionType<'ctx>) -> Result<Vec<Type<'ctx
     (0..(func_type.input_count()))
         .map(|n| func_type.input(n))
         .collect()
+}
+
+fn contract_input_name<'ctx, 'blk>(
+    contract: ContractOpRef<'ctx, 'blk>,
+    idx: usize,
+) -> Option<String> {
+    if !contract.has_arg_name(idx.try_into().ok()?) {
+        return None;
+    }
+    let arg_attrs = contract.arg_attrs().ok()?;
+    let arg = arg_attrs.get(idx)?;
+    let attr = unsafe {
+        melior::ir::Attribute::from_option_raw(mlirDictionaryAttrGetElementByName(
+            arg.to_raw(),
+            StringRef::new("function.arg_name").to_raw(),
+        ))
+    }?;
+    StringAttribute::try_from(attr)
+        .ok()
+        .map(|attr| attr.value().to_string())
 }
 
 pub fn find_contract_target_on_module<'ctx, 'blk>(

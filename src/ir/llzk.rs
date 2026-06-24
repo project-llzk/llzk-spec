@@ -23,12 +23,12 @@ use llzk::prelude::{
     TemplateOpLike, TemplateOpRef, TemplateSymbolBindingOpLike as _,
 };
 use llzk_sys::llzkFunction_FuncDefOpGetArgNameAttr;
-use melior::ir::{BlockLike as _, TypeLike as _, ValueLike};
 use melior::ir::{
     Module, OperationRef, Type,
     attribute::{Attribute, FlatSymbolRefAttribute, StringAttribute},
     operation::{OperationLike, WalkOrder, WalkResult},
 };
+use melior::ir::{TypeLike as _, ValueLike};
 use mlir_sys::mlirOperationGetParentOperation;
 use std::collections::{HashMap, HashSet};
 
@@ -661,7 +661,7 @@ pub(crate) fn preferred_struct_input_func<'c: 'a, 'a>(
     struct_op
         .constrain_func()
         .map(|func| (func, 1))
-        .or_else(|| find_struct_function(struct_op, "product").map(|func| (func, 0)))
+        .or_else(|| struct_op.product_func().map(|func| (func, 0)))
         .or_else(|| struct_op.compute_func().map(|func| (func, 0)))
 }
 
@@ -725,18 +725,6 @@ pub(crate) fn function_input_name<'c, 'a>(
     }
     .and_then(|a| StringAttribute::try_from(a).ok())
     .map(|a| a.value().to_string())
-}
-
-fn find_struct_function<'c: 'a, 'a>(
-    struct_op: StructDefOpRef<'c, 'a>,
-    name: &str,
-) -> Option<FuncDefOpRef<'c, 'a>> {
-    std::iter::successors(struct_op.body().first_operation(), |op| op.next_in_block()).find_map(
-        |op| {
-            let func = FuncDefOpRef::from_option_raw(op.to_raw())?;
-            (string_attribute(&func, "sym_name").as_deref() == Some(name)).then_some(func)
-        },
-    )
 }
 
 /// Collect member reference paths to populate `member_paths`, using `root` as
