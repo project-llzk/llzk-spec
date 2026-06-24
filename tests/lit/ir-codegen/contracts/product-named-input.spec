@@ -4,7 +4,7 @@
 
 contract for tmpl::Prod {
   let copy = input;
-  ensure copy == arg[0];
+  ensure copy == $arg[0];
 }
 
 // CHECK-LABEL: verif.contract @tmpl$Prod$contract$0 for @tmpl::@Prod

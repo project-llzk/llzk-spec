@@ -5,16 +5,16 @@
 predicate orp(x, y) = x || y
 
 contract for Foo {
-  require arg[0] == 3;
+  require $arg[0] == 3;
   ensure out < 4;
 
   compute {
-    require arg[0] != 8;
+    require $arg[0] != 8;
     ensure orp(true, false);
   }
 
   constrain {
-    require arg[0] > 2;
+    require $arg[0] > 2;
     ensure out < 10;
   }
 }

@@ -710,7 +710,7 @@ fn collect_function_input_names<'c: 'a, 'a>(
 
 /// Returns the user-facing name for a function input, if the IR exposes one.
 ///
-/// Unnamed arguments remain addressable through spec-side `arg[N]` syntax, so
+/// Unnamed arguments remain addressable through spec-side `$arg[N]` syntax, so
 /// this only reports names backed by the canonical `function.arg_name`
 /// attribute.
 pub(crate) fn function_input_name<'c, 'a>(

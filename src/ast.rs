@@ -479,6 +479,11 @@ pub enum Expression<'a, M = ()> {
         span: Span,
         meta: M,
     },
+    Res {
+        index: usize,
+        span: Span,
+        meta: M,
+    },
     Nondet {
         span: Span,
         meta: M,
@@ -510,6 +515,7 @@ impl<M> Expression<'_, M> {
             | Self::Len { meta, .. }
             | Self::Old { meta, .. }
             | Self::Arg { meta, .. }
+            | Self::Res { meta, .. }
             | Self::Nondet { meta, .. }
             | Self::Boolean { meta, .. }
             | Self::Number { meta, .. } => meta,
@@ -531,6 +537,7 @@ impl<M> Spanned for Expression<'_, M> {
             | Self::Len { span, .. }
             | Self::Old { span, .. }
             | Self::Arg { span, .. }
+            | Self::Res { span, .. }
             | Self::Nondet { span, .. }
             | Self::Boolean { span, .. }
             | Self::Number { span, .. } => *span,

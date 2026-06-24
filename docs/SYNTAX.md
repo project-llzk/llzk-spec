@@ -48,11 +48,11 @@ referenced directly by name.
 
 ### Function inputs
 
-`arg[N]` always refers to the N-th contract input:
+`$arg[N]` always refers to the N-th contract input:
 
 ```spec
 contract for IsZero::IsZero {
-  ensure arg[0] == 0 ? out == 1 : out == 0;
+  ensure $arg[0] == 0 ? out == 1 : out == 0;
 }
 ```
 
@@ -61,11 +61,20 @@ available by its bare name:
 
 ```spec
 contract for Num2Bits::Num2Bits {
-  ensure in == arg[0];
+  ensure in == $arg[0];
 }
 ```
 
-`arg[N]` is zero-based (matches `@compute` and `@product` functions) from the spec author’s point of view.
+`$arg[N]` is zero-based (matches `@compute` and `@product` functions) from the spec author’s point of view.
+
+`$res[N]` always refers to the N-th contract output when the target is a free
+function:
+
+```spec
+contract for foo {
+  ensure $res[0] == $res[0];
+}
+```
 
 ### Escaped identifiers
 
@@ -103,7 +112,7 @@ ensure out == 0 || out == 1;
 Local bindings:
 
 ```spec
-let bit_i = (arg[0] & 2 ** i) != 0 ? 1 : 0;
+let bit_i = ($arg[0] & 2 ** i) != 0 ? 1 : 0;
 ```
 
 You can also bind `nondet`:
@@ -338,7 +347,8 @@ The current implementation is intentionally structural.
 
 - It validates symbol existence and visibility, not full semantic correctness.
 - It does not yet lower specs into MLIR (dependent on `verif` dialect implementation).
-- `arg[N]` always addresses contract inputs positionally.
+- `$arg[N]` always addresses contract inputs positionally.
+- `$res[N]` always addresses contract outputs positionally.
 - Bare input names are additionally available when the LLZK IR carries a
   `function.arg_name` attribute.
 - Nested `struct.type` access checks public visibility, but this is still name-

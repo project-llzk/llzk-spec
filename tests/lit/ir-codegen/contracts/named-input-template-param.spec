@@ -5,14 +5,14 @@
 contract for Num2Bits::Num2Bits {
   require n == n;
   let copy = in;
-  let same = arg[0];
+  let same = $arg[0];
   ensure true;
 }
 
 contract for LessThanPower::LessThanPower {
   require base == base;
   let res = in;
-  let same = arg[0];
+  let same = $arg[0];
   ensure true;
 }
 

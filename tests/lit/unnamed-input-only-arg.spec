@@ -3,7 +3,7 @@
 // END.
 
 contract for tmpl::Prod {
-  ensure arg[0] == arg[0];
+  ensure $arg[0] == $arg[0];
   ensure input == input;
 }
 

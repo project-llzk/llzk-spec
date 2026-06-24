@@ -378,7 +378,7 @@ impl<'a> Verifier<'a> {
                 }
                 self.verify_expression(expression, scopes, context);
             }
-            Expression::Arg { .. } => {}
+            Expression::Arg { .. } | Expression::Res { .. } => {}
             Expression::Symbol(identifier) => {
                 if !self.name_visible(
                     scopes,

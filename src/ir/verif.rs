@@ -675,6 +675,9 @@ impl<'ast, 'ctx, 'blk> ast::Visitor<TypedExpression<'ast, 'ctx>> for SpecCodegen
             Arg { index, span, .. } => self.scope.find_parameter(index).copied().map_err(|err| {
                 err.into_compile_error(&self.filename, Some(*span), format!("on argument #{index}"))
             }),
+            Res { index, span, .. } => self.scope.find_output(index).copied().map_err(|err| {
+                err.into_compile_error(&self.filename, Some(*span), format!("on result #{index}"))
+            }),
             Nondet { meta, .. } => self.insert_op_with_result(nondet(location, *meta)),
             Boolean { value, meta, .. } => {
                 let op = arith::constant(
