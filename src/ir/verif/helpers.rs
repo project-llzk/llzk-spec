@@ -7,13 +7,13 @@ use crate::{
         llzk::{LlzkContractTarget, function_input_name},
         verif::{
             SpecCodegen, TypedExpression, TypedIdentifier, TypedPredicateDecl,
-            affine::{AffineExpr, AffineMap},
             scope::{CodegenScope, ScopeData, ScopeTag},
         },
     },
 };
 use ::melior::ir::Block;
 use llzk::{
+    affine::{AffineExpr, AffineMap},
     builder::{OpBuilder, OpBuilderLike},
     dialect::{
         array, cast, function,
