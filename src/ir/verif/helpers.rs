@@ -14,6 +14,7 @@ use crate::{
 };
 use ::melior::ir::Block;
 use llzk::{
+    affine::{AffineExpr, AffineMap},
     builder::{OpBuilder, OpBuilderLike},
     dialect::{
         array, cast, function,
@@ -338,11 +339,13 @@ impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
                 .const_binding_ops()
                 .into_iter()
                 .try_for_each(|param_op| {
-                    let symbol = param_op.sym_name().to_string();
-                    let param_type = param_op.type_opt().unwrap_or_else(|| self.felt_type());
-                    let read_value = self
-                        .insert_op_with_result(poly::read_const(location, &symbol, param_type))?;
-                    let name = self.create_ident(&symbol, span);
+                    let symbol = param_op.sym_name();
+                    let read_value = self.insert_op_with_result(poly::read_const(
+                        location,
+                        symbol,
+                        param_op.type_opt().unwrap(),
+                    ))?;
+                    let name = self.create_ident(symbol, span);
                     self.scope
                         .top()
                         .bind_local(&name, read_value)

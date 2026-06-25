@@ -314,7 +314,7 @@ impl<'ctx, 'blk> LlzkLoopTarget<'ctx, 'blk> {
             .map(|v| v.r#type())
     }
 
-    /// Adds the loop label to the targetted loop if it wasn't present during analysis and had to
+    /// Adds the loop label to the targeted loop if it wasn't present during analysis and had to
     /// be inferred.
     ///
     /// The verif.invariant operation expects the label is present during verification.
