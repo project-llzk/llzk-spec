@@ -1,0 +1,15 @@
+module attributes { llzk.lang} {
+  poly.template @OneHotTemplate {
+    poly.param @N: index 
+    struct.def @OneHot {
+      struct.member @bits: !array.type<@N x !felt.type>
+      function.def @compute(%bit: !felt.type) -> !struct.type<@OneHotTemplate::@OneHot<[@N]>> {
+        %self = struct.new : <@OneHotTemplate::@OneHot<[@N]>>
+        function.return %self : !struct.type<@OneHotTemplate::@OneHot<[@N]>>
+      }
+      function.def @constrain(%self: !struct.type<@OneHotTemplate::@OneHot<[@N]>>, %bit: !felt.type) {
+        function.return
+      }
+    }
+  }
+}

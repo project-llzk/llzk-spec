@@ -19,8 +19,8 @@ use llzk::dialect::{
 };
 use llzk::operation::WalkOperationMutLike;
 use llzk::prelude::{
-    FuncDefOpRef, FuncDefOpRefMut, PodType, StructDefOpRef, SymbolRefAttribute, TemplateOpLike,
-    TemplateOpRef, TemplateSymbolBindingOpLike as _,
+    FuncDefOpRef, FuncDefOpRefMut, OperationMutLike, PodType, StructDefOpRef, SymbolRefAttribute,
+    TemplateOpLike, TemplateOpRef, TemplateSymbolBindingOpLike as _,
 };
 use melior::ir::{BlockLike, RegionLike, TypeLike as _, ValueLike};
 use melior::ir::{
@@ -179,7 +179,6 @@ impl<'ctx, 'op> ContractTargetInfo<'ctx> for LlzkContractTarget<'ctx, 'op> {
                 .and_then(|a| Ok(StringAttribute::try_from(a)?.value()))
                 .ok();
             let t = unsafe { Type::from_raw(f.argument(n).unwrap().r#type().to_raw()) };
-
             match name {
                 Some(name) => InputInfo::named(name, t),
                 None => InputInfo::unnamed(t),
@@ -240,7 +239,7 @@ impl<'ctx, 'op> ContractTargetInfo<'ctx> for LlzkContractTarget<'ctx, 'op> {
             .map(|op| match op.kind {
                 LoopKind::For => LoopInfo::new_for_loop(
                     op.label(),
-                    |_| ts.felt_type(),
+                    |_| ts.index_type(),
                     op.extra_operands_types(),
                 ),
                 LoopKind::While => LoopInfo::new_while_loop(op.label(), op.extra_operands_types()),
@@ -314,7 +313,23 @@ impl<'ctx, 'blk> LlzkLoopTarget<'ctx, 'blk> {
             })
             .map(|v| v.r#type())
     }
+
+    /// Adds the loop label to the targeted loop if it wasn't present during analysis and had to
+    /// be inferred.
+    ///
+    /// The verif.invariant operation expects the label is present during verification.
+    pub fn ensure_label_is_present(&mut self) {
+        if self.has_attribute("loop_label") {
+            return;
+        }
+        let label = LoopLabel::implicit(self.idx);
+        let context = self.context();
+        let label = StringAttribute::new(unsafe { context.to_ref() }, &label.to_string());
+        self.set_attribute("loop_label", label.into());
+    }
 }
+
+impl<'ctx, 'op> OperationMutLike<'ctx, 'op> for LlzkLoopTarget<'ctx, 'op> {}
 
 impl<'ctx, 'op> OperationLike<'ctx, 'op> for LlzkLoopTarget<'ctx, 'op> {
     fn to_raw(&self) -> mlir_sys::MlirOperation {

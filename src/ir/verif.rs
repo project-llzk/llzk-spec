@@ -6,7 +6,7 @@
 use std::slice;
 
 use llzk::{
-    builder::OpBuilder,
+    builder::{OpBuilder, OpBuilderLike},
     dialect::{array, bool, felt, function, llzk::nondet, pod, r#struct, verif},
     prelude::*,
 };
@@ -150,13 +150,7 @@ impl<'ast, 'ctx, 'blk> ast::Visitor<TypedContractDecl<'ast, 'ctx>>
                 target.fully_qualified_name()
             ))
         })?;
-        // Push into the parent block, this is where we will insert the contract op.
-        self.push(target.block().ok_or_else(|| {
-            CompileError::Ir(format!(
-                "expected target '{}' to be contained in a block",
-                target.fully_qualified_name()
-            ))
-        })?);
+
         // Create a function def op pretending to be the contract for now.
         let block = verif::contract(
             self.builder(),
@@ -191,8 +185,6 @@ impl<'ast, 'ctx, 'blk> ast::Visitor<TypedContractDecl<'ast, 'ctx>>
         self.bind_loop_info(target, decl)?;
 
         decl.body().accept(self)?;
-        // We pop twice: the body of the contract and the parent of the target.
-        self.pop();
         self.pop();
         Ok(())
     }
@@ -270,7 +262,7 @@ impl<'ast, 'ctx> ast::Visitor<TypedStatement<'ast, 'ctx>> for SpecCodegen<'ast, 
                         block.append_operation(scf::r#yield(&[], self.location(*span)));
                     }
                     let op = scf::execute_region(&[], region, self.location(*span));
-                    self.top_mut().append_operation(op);
+                    self.insert_op(op);
                     Ok(())
                 }
             },
@@ -284,7 +276,7 @@ impl<'ast, 'ctx> ast::Visitor<TypedStatement<'ast, 'ctx>> for SpecCodegen<'ast, 
                     block_ref.append_operation(scf::r#yield(&[], self.location(block.span())));
                 }
                 let op = scf::execute_region(&[], region, self.location(block.span()));
-                self.top_mut().append_operation(op);
+                self.insert_op(op);
                 Ok(())
             }
             Require { expression, span } => match self.closest_tag() {
@@ -334,17 +326,40 @@ impl<'ast, 'ctx> ast::Visitor<TypedStatement<'ast, 'ctx>> for SpecCodegen<'ast, 
                     .append_operation(function::r#return(location, &[value]));
                 Ok(())
             }
-            Increases { .. } => match self.closest_tag() {
-                ScopeTag::Predicate => stmt_not_allowed!("increases", "predicates"),
-                _ => todo!("increases statement is not supported yet"),
+            Increases { expression, span } => match self.closest_tag() {
+                ScopeTag::Invariant => {
+                    let location = self.location(*span);
+                    let value = expression.accept(self)?;
+                    let value = self.cast_if_necessary(value, self.ctx.felt_type(), location)?;
+                    verif::increases(self.builder(), location, value);
+                    Ok(())
+                }
+                _ => stmt_not_allowed!("increases", "predicates"),
             },
-            Decreases { .. } => match self.closest_tag() {
-                ScopeTag::Predicate => stmt_not_allowed!("decreases", "predicates"),
-                _ => todo!("decreases statement is not supported yet"),
+            Decreases { expression, span } => match self.closest_tag() {
+                ScopeTag::Invariant => {
+                    let location = self.location(*span);
+                    let value = expression.accept(self)?;
+                    let value = self.cast_if_necessary(value, self.ctx.felt_type(), location)?;
+                    verif::decreases(self.builder(), location, value);
+                    Ok(())
+                }
+                _ => stmt_not_allowed!("decreases", "predicates"),
             },
-            Step { .. } => match self.closest_tag() {
-                ScopeTag::Predicate => stmt_not_allowed!("step", "predicates"),
-                _ => todo!("step statement is not supported yet"),
+            Step { expression, span } => match self.closest_tag() {
+                ScopeTag::Invariant => {
+                    let op = verif::step(self.builder(), self.location(*span));
+                    let block = op.region(0)?.append_block(melior::ir::Block::new(&[]));
+                    let saved = self.builder().save_insertion_point();
+                    self.builder().set_insertion_point_at_end(block);
+                    let value = expression.accept(self);
+                    if let Ok(value) = &value {
+                        verif::step_yield(self.builder(), self.location(*span), *value);
+                    }
+                    self.builder().restore_insertion_point(saved);
+                    Ok(())
+                }
+                _ => stmt_not_allowed!("step", "predicates"),
             },
             Invariant(decl) => match self.closest_tag() {
                 ScopeTag::Predicate => stmt_not_allowed!("invariant", "predicates"),
@@ -361,8 +376,36 @@ impl<'ast, 'ctx, 'blk> ast::Visitor<TypedInvariantDecl<'ast, 'ctx>>
 {
     type Output = Result<(), CompileError>;
 
-    fn visit(&mut self, _: &TypedInvariantDecl<'ast, 'ctx>) -> Self::Output {
-        todo!("invariant statement is not supported yet");
+    fn visit(&mut self, decl: &TypedInvariantDecl<'ast, 'ctx>) -> Self::Output {
+        let args = decl
+            .bindings()
+            .iter()
+            .map(|ident| (*ident.meta(), self.location(ident.span())))
+            .collect::<Vec<_>>();
+        let op = verif::invariant(
+            self.builder(),
+            self.location(decl.span()),
+            decl.loop_name().value(),
+            &args,
+        );
+        let body = op.body();
+        assert_eq!(body.argument_count(), decl.bindings().len());
+        self.push_tagged(body, ScopeTag::Invariant);
+        for (n, ident) in decl.bindings().iter().enumerate() {
+            let arg = body.argument(n)?;
+            self.top_mut()
+                .bind_local(ident, arg.into())
+                .map_err(|err| {
+                    err.into_compile_error(
+                        &self.filename,
+                        Some(ident.span()),
+                        format!("while binding invariant argument #{n} '{}'", ident.value()),
+                    )
+                })?;
+        }
+        decl.body().accept(self)?;
+        self.pop();
+        Ok(())
     }
 }
 
@@ -393,7 +436,7 @@ impl<'ast, 'ctx, 'blk> ast::Visitor<TypedExpression<'ast, 'ctx>> for SpecCodegen
                 assert_eq!(then_result.r#type(), else_result.r#type());
 
                 let op = scf::r#if(condition, &[*meta], then_region, else_region, location);
-                self.top_mut().append_operation_with_result(op)
+                self.insert_op_with_result(op)
             }
             Binary {
                 op,
@@ -474,7 +517,7 @@ impl<'ast, 'ctx, 'blk> ast::Visitor<TypedExpression<'ast, 'ctx>> for SpecCodegen
                         felt::pow(location, lhs, rhs)?
                     }
                 };
-                let value = self.top_mut().append_operation_with_result(op)?;
+                let value = self.insert_op_with_result(op)?;
                 assert_eq!(*meta, value.r#type());
                 Ok(value)
             }
@@ -488,7 +531,7 @@ impl<'ast, 'ctx, 'blk> ast::Visitor<TypedExpression<'ast, 'ctx>> for SpecCodegen
                         felt::neg(location, value)?
                     }
                 };
-                let value = self.top_mut().append_operation_with_result(op)?;
+                let value = self.insert_op_with_result(op)?;
                 assert_eq!(*meta, value.r#type());
                 Ok(value)
             }
@@ -509,14 +552,13 @@ impl<'ast, 'ctx, 'blk> ast::Visitor<TypedExpression<'ast, 'ctx>> for SpecCodegen
                         target_value.r#type()
                     )));
                 };
-                self.top_mut()
-                    .append_operation_with_result(if arr_type.dims().len() > 1 {
-                        array::extract
-                    } else {
-                        array::read
-                    }(
-                        location, *meta, target_value, &[index_value]
-                    ))
+                self.insert_op_with_result(if arr_type.dims().len() > 1 {
+                    array::extract
+                } else {
+                    array::read
+                }(
+                    location, *meta, target_value, &[index_value]
+                ))
             }
             Member {
                 target,
@@ -534,15 +576,10 @@ impl<'ast, 'ctx, 'blk> ast::Visitor<TypedExpression<'ast, 'ctx>> for SpecCodegen
                         target_value,
                         member.value(),
                     )?;
-                    self.top_mut().append_operation_with_result(op)
+                    self.insert_op_with_result(op)
                 } else if PodType::try_from(target_value.r#type()).is_ok() {
-                    let op = pod::read(
-                        location,
-                        target_value,
-                        FlatSymbolRefAttribute::new(self.context(), member.value()),
-                        *meta,
-                    );
-                    self.top_mut().append_operation_with_result(op)
+                    let op = pod::read(location, target_value, member.value(), *meta);
+                    self.insert_op_with_result(op)
                 } else {
                     Err(CompileError::Ir(format!(
                         "was expecting either a struct or pod type but got {}",
@@ -562,9 +599,50 @@ impl<'ast, 'ctx, 'blk> ast::Visitor<TypedExpression<'ast, 'ctx>> for SpecCodegen
                     &args,
                     slice::from_ref(meta),
                 )?;
-                self.top_mut().append_operation_with_result(op)
+                self.insert_op_with_result(op)
             }
-            Quantifier { .. } => todo!("quantifier expression is not supported yet"),
+            Quantifier {
+                quantifier_kind,
+                binding,
+                domain,
+                body,
+                span,
+                ..
+            } => {
+                let location = self.location(*span);
+                let domain = match domain {
+                    ast::QuantifierDomain::Range { start, end, span } => {
+                        let from = start.accept(self)?;
+                        let to = end.accept(self)?;
+                        let location = self.location(*span);
+                        self.fill_array_with_range(location, from, to)?
+                    }
+                    ast::QuantifierDomain::Expr(expression) => expression.accept(self)?,
+                };
+
+                let op = match quantifier_kind {
+                    ast::QuantifierKind::Forall => bool::forall(self.builder(), location, domain),
+                    ast::QuantifierKind::Exists => bool::exists(self.builder(), location, domain),
+                }?;
+                let block = op.region(0).unwrap().first_block().unwrap();
+                self.push(block);
+                self.top_mut()
+                    .bind_local(binding, block.argument(0).unwrap().into())
+                    .map_err(|err| {
+                        err.into_compile_error(
+                            &self.filename,
+                            Some(binding.span()),
+                            format!(
+                                "while binding {quantifier_kind} expression argument '{}'",
+                                binding.value()
+                            ),
+                        )
+                    })?;
+                let result = body.accept(self)?;
+                bool::r#yield(self.builder(), location, result);
+                self.pop();
+                Ok(op.result(0).unwrap().into())
+            }
             Len { target, span, .. } => {
                 let target_value = target.accept(self)?;
                 let location = self.location(*span);
@@ -580,24 +658,28 @@ impl<'ast, 'ctx, 'blk> ast::Visitor<TypedExpression<'ast, 'ctx>> for SpecCodegen
                     IntegerAttribute::new(self.ctx.index_type(), 0).into(),
                     location,
                 );
-                let dim = self.top_mut().append_operation_with_result(op)?;
+                let dim = self.insert_op_with_result(op)?;
                 let op = array::len(location, target_value, dim);
-                self.top_mut().append_operation_with_result(op)
+                self.insert_op_with_result(op)
             }
-            Old { .. } => todo!("old expression is not supported yet"),
+            Old {
+                expression, span, ..
+            } => {
+                let value = expression.accept(self)?;
+                let op = verif::old(self.builder(), self.location(*span), value);
+                Ok(op.result(0)?.into())
+            }
             Arg { index, span, .. } => self.scope.find_parameter(index).copied().map_err(|err| {
                 err.into_compile_error(&self.filename, Some(*span), format!("on argument #{index}"))
             }),
-            Nondet { meta, .. } => self
-                .top_mut()
-                .append_operation_with_result(nondet(location, *meta)),
+            Nondet { meta, .. } => self.insert_op_with_result(nondet(location, *meta)),
             Boolean { value, meta, .. } => {
                 let op = arith::constant(
                     self.context(),
                     IntegerAttribute::new(*meta, (*value).into()).into(),
                     location,
                 );
-                self.top_mut().append_operation_with_result(op)
+                self.insert_op_with_result(op)
             }
             Number { value, meta, .. } => {
                 assert_eq!(*meta, self.felt_type());
@@ -606,8 +688,7 @@ impl<'ast, 'ctx, 'blk> ast::Visitor<TypedExpression<'ast, 'ctx>> for SpecCodegen
                     value.value(),
                     self.ctx.prime(),
                 );
-                self.top_mut()
-                    .append_operation_with_result(felt::constant(location, value)?)
+                self.insert_op_with_result(felt::constant(location, value)?)
             }
             Symbol(symbol) => self.find_symbol(symbol),
         }

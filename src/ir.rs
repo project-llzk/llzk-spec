@@ -120,6 +120,11 @@ impl<'ctx, 'm> MlirTypeSystem<'ctx, 'm> {
             next_var: 0,
         }
     }
+
+    /// Creates an index type.
+    pub fn index_type(&self) -> Type<'ctx> {
+        self.ctx.index_type()
+    }
 }
 
 impl<'ctx> TypeSystem for MlirTypeSystem<'ctx, '_> {

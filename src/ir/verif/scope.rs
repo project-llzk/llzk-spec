@@ -25,6 +25,8 @@ pub enum ScopeTag {
     Compute,
     /// Tag for constrain scopes.
     Constrain,
+    /// Tag for invariant scopes.
+    Invariant,
 }
 
 impl ScopeTag {

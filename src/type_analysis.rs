@@ -347,6 +347,7 @@ pub trait ContractTargetInfo<'info> {
 }
 
 /// Information about a contract target's input argument.
+#[derive(Debug)]
 pub struct InputInfo<'ctx, T> {
     name: Option<&'ctx str>,
     r#type: T,
