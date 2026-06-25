@@ -76,6 +76,15 @@ contract for foo {
 }
 ```
 
+If the LLZK IR carries a `function.res_name` attribute, that same output is also
+available by its bare name:
+
+```spec
+contract for foo {
+  ensure out == $res[0];
+}
+```
+
 ### Escaped identifiers
 
 If an LLZK symbol name collides with a reserved spec keyword, escape it with

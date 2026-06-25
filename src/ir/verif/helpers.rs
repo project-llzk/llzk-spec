@@ -482,15 +482,38 @@ impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
         (0..arg_count).try_for_each(|n| -> Result<(), CompileError> {
             let arg = Value::from(block.argument(n + offset.unwrap_or_default())?);
 
-            let name = self.create_ident(&format!("$res[{n}]"), span);
+            let positional_name = self.create_ident(&format!("$res[{n}]"), span);
 
-            self.scope.top().bind_output(&name, arg, n).map_err(|err| {
-                err.into_compile_error(
-                    &self.filename,
-                    Some(span.span()),
-                    format!("while binding outptu #{n} of target"),
-                )
-            })
+            self.scope
+                .top()
+                .bind_output(&positional_name, arg, n)
+                .map_err(|err| {
+                    err.into_compile_error(
+                        &self.filename,
+                        Some(span.span()),
+                        format!("while binding output #{n} of target"),
+                    )
+                })?;
+
+            if let Some(output_name) = func
+                .res_name_attr(n)
+                .ok()
+                .flatten()
+                .map(|a| a.value().to_string())
+            {
+                let output_name_ident = self.create_ident(&output_name, span);
+                self.top_mut()
+                    .bind_local(&output_name_ident, arg)
+                    .map_err(|err| {
+                        err.into_compile_error(
+                            &self.filename,
+                            Some(span.span()),
+                            format!("while binding named output '{output_name}' of target"),
+                        )
+                    })?;
+            }
+
+            Ok(())
         })
     }
 

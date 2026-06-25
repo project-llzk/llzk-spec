@@ -39,11 +39,11 @@
         "release-helpers": "release-helpers"
       },
       "locked": {
-        "lastModified": 1782318267,
-        "narHash": "sha256-eRtEkAjPz6jh1pu6YaF5nbyQOFx34v8r6aibY0rtHAU=",
+        "lastModified": 1782408558,
+        "narHash": "sha256-eVJHvhBaUfOE+k7jFChjFdlU6tTY5B8GY68jSVwoSWs=",
         "owner": "project-llzk",
         "repo": "llzk-lib",
-        "rev": "7de21abea032407cbefcc92089b674c2c1e6c118",
+        "rev": "1a8bf30032ee2a1ef11116c32c8752152052208e",
         "type": "github"
       },
       "original": {
@@ -94,15 +94,16 @@
         "rust-overlay": "rust-overlay"
       },
       "locked": {
-        "lastModified": 1782333753,
-        "narHash": "sha256-poMqRCR1EtPvLEqjG5D6Y09v4EeFiiDafdnB/wXdDC4=",
+        "lastModified": 1782409813,
+        "narHash": "sha256-r4QsfGczhgb+f2dpOS4zoyaB3yxVCy9LCK3NpfDtSVQ=",
         "owner": "project-llzk",
         "repo": "llzk-rs",
-        "rev": "dbac358076d1954af487659c0a37be3191ec85f5",
+        "rev": "d816cb0fcb06fd760dfe32a9c8ce584f68dd6394",
         "type": "github"
       },
       "original": {
         "owner": "project-llzk",
+        "ref": "iangneal/func-attr-support",
         "repo": "llzk-rs",
         "type": "github"
       }

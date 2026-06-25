@@ -153,6 +153,9 @@ contract for IsZero::IsZero {
 If the LLZK IR also carries `function.arg_name`, that same input may be
 referenced by its bare name as well.
 
+Likewise, free-function outputs may be named by `function.res_name`, making
+that output available both as a bare name and positionally as `$res[N]`.
+
 ## Members And Visibility
 
 Member access uses dot notation:

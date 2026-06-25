@@ -22,10 +22,9 @@ use llzk::prelude::{
     FuncDefOpRef, FuncDefOpRefMut, OperationMutLike, PodType, StructDefOpRef, SymbolRefAttribute,
     TemplateOpLike, TemplateOpRef, TemplateSymbolBindingOpLike as _,
 };
-use llzk_sys::llzkFunction_FuncDefOpGetArgNameAttr;
 use melior::ir::{
     Module, OperationRef, Type,
-    attribute::{Attribute, FlatSymbolRefAttribute, StringAttribute},
+    attribute::{FlatSymbolRefAttribute, StringAttribute},
     operation::{OperationLike, WalkOrder, WalkResult},
 };
 use melior::ir::{TypeLike as _, ValueLike};
@@ -188,13 +187,18 @@ impl<'ctx, 'op> ContractTargetInfo<'ctx> for LlzkContractTarget<'ctx, 'op> {
             LlzkContractTarget::Function(op_ref) => Some(op_ref),
         }
         .into_iter()
-        .flat_map(|op_ref| op_ref.function_type())
-        .flat_map(|t| {
-            let count = t.result_count();
-            (0..count).map(move |n| t.result(n).unwrap())
+        .flat_map(|op_ref| {
+            let names = function_output_names(*op_ref);
+            op_ref.function_type().into_iter().flat_map(move |t| {
+                let count = t.result_count();
+                let names = names.clone();
+                (0..count).map(move |n| (n, t.result(n).unwrap(), names.get(n).cloned().flatten()))
+            })
         })
-        // TODO: Try extract `function.res_name` for the output if available.
-        .map(OutputInfo::unnamed)
+        .map(|(_, t, name)| match name {
+            Some(name) => OutputInfo::named(Box::leak(name.into_boxed_str()), t),
+            None => OutputInfo::unnamed(t),
+        })
     }
 
     fn members(&self) -> impl Iterator<Item = MemberInfo<'ctx, Type<'ctx>>> {
@@ -647,6 +651,9 @@ fn collect_function_contract_metadata<'c: 'a, 'a>(
         .visible_symbols
         .extend(collect_function_input_names(operation));
     metadata
+        .visible_symbols
+        .extend(collect_function_output_names(operation));
+    metadata
 }
 
 /// Returns the struct entrypoint whose arguments should be exposed to specs.
@@ -708,6 +715,17 @@ fn collect_function_input_names<'c: 'a, 'a>(
     names
 }
 
+fn collect_function_output_names<'c: 'a, 'a>(
+    operation: &impl OperationLike<'c, 'a>,
+) -> HashSet<String> {
+    let mut names = HashSet::new();
+    let Some(func) = FuncDefOpRef::from_option_raw(operation.to_raw()) else {
+        return names;
+    };
+    names.extend(function_output_names(func).into_iter().flatten());
+    names
+}
+
 /// Returns the user-facing name for a function input, if the IR exposes one.
 ///
 /// Unnamed arguments remain addressable through spec-side `$arg[N]` syntax, so
@@ -717,14 +735,25 @@ pub(crate) fn function_input_name<'c, 'a>(
     func: FuncDefOpRef<'c, 'a>,
     idx: usize,
 ) -> Option<String> {
-    unsafe {
-        Attribute::from_option_raw(llzkFunction_FuncDefOpGetArgNameAttr(
-            func.to_raw(),
-            idx as u32,
-        ))
-    }
-    .and_then(|a| StringAttribute::try_from(a).ok())
-    .map(|a| a.value().to_string())
+    func.arg_name_attr(idx)
+        .ok()
+        .flatten()
+        .map(|a| a.value().to_string())
+}
+
+fn function_output_names<'c, 'a>(func: FuncDefOpRef<'c, 'a>) -> Vec<Option<String>> {
+    let count = func
+        .function_type()
+        .map(|t| t.result_count())
+        .unwrap_or_default();
+    (0..count)
+        .map(|idx| {
+            func.res_name_attr(idx)
+                .ok()
+                .flatten()
+                .map(|a| a.value().to_string())
+        })
+        .collect()
 }
 
 /// Collect member reference paths to populate `member_paths`, using `root` as
