@@ -2,6 +2,7 @@
 
 use ::melior::ir::Block;
 use llzk::{
+    affine::{AffineExpr, AffineMap},
     builder::{OpBuilder, OpBuilderLike},
     dialect::{
         array, cast, function,
@@ -32,7 +33,6 @@ use crate::{
         llzk::LlzkContractTarget,
         verif::{
             SpecCodegen, TypedExpression, TypedIdentifier, TypedPredicateDecl,
-            affine::{AffineExpr, AffineMap},
             scope::{CodegenScope, ScopeData, ScopeTag},
         },
     },

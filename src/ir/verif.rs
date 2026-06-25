@@ -29,7 +29,6 @@ use crate::{
     type_analysis::TypeChecker,
 };
 
-mod affine;
 mod helpers;
 mod scope;
 
