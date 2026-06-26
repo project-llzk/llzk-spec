@@ -3,7 +3,9 @@
 // END.
 
 contract for foo {
-  ensure out == $res[0];
+  let named = out;
+  let positional = $res[0];
+  ensure named == positional;
 }
 
 // CHECK-LABEL: verif.contract @foo$contract$0 for @foo

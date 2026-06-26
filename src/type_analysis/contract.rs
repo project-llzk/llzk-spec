@@ -1,5 +1,4 @@
 use std::{
-    borrow::Cow,
     marker::PhantomData,
     ops::{Deref, DerefMut},
 };
@@ -108,15 +107,21 @@ where
         // are in the correct order in the `inputs` vector.
         for (n, t) in info.outputs().enumerate() {
             inputs.push(t.r#type.clone());
-            let name = t
-                .name
-                .map(Cow::Borrowed)
-                .unwrap_or_else(|| Cow::Owned(format!("$res[{n}]")));
-            let name = self.ident(&name, decl);
+            let positional_name = self.ident(&format!("$res[{n}]"), decl);
             diags.extract_type_result(
-                self.ctx.scope().top().bind_output(&name, t.r#type, n),
+                self.ctx
+                    .scope()
+                    .top()
+                    .bind_output(&positional_name, t.r#type.clone(), n),
                 || format!("while binding output #{n}"),
             );
+            if let Some(name) = t.name {
+                let name = self.ident(name, decl);
+                diags.extract_type_result(
+                    self.ctx.scope().top().bind_local(&name, t.r#type),
+                    || format!("while binding named output '{}'", name.value()),
+                );
+            }
         }
         // Fill the scope with the struct members.
         for member in info.members() {

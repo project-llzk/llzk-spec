@@ -492,7 +492,7 @@ checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
 [[package]]
 name = "llzk"
 version = "0.4.0"
-source = "git+https://github.com/project-llzk/llzk-rs?branch=iangneal%2Ffunc-attr-support#d816cb0fcb06fd760dfe32a9c8ce584f68dd6394"
+source = "git+https://github.com/project-llzk/llzk-rs?branch=iangneal%2Ffunc-attr-support#7200a2a21a21137e5e2ddbd3bd31fffad757108e"
 dependencies = [
  "llzk-macro",
  "llzk-sys",
@@ -507,7 +507,7 @@ dependencies = [
 [[package]]
 name = "llzk-macro"
 version = "0.3.0"
-source = "git+https://github.com/project-llzk/llzk-rs?branch=iangneal%2Ffunc-attr-support#d816cb0fcb06fd760dfe32a9c8ce584f68dd6394"
+source = "git+https://github.com/project-llzk/llzk-rs?branch=iangneal%2Ffunc-attr-support#7200a2a21a21137e5e2ddbd3bd31fffad757108e"
 dependencies = [
  "convert_case",
  "proc-macro2",
@@ -540,7 +540,7 @@ dependencies = [
 [[package]]
 name = "llzk-sys"
 version = "20.0.0"
-source = "git+https://github.com/project-llzk/llzk-rs?branch=iangneal%2Ffunc-attr-support#d816cb0fcb06fd760dfe32a9c8ce584f68dd6394"
+source = "git+https://github.com/project-llzk/llzk-rs?branch=iangneal%2Ffunc-attr-support#7200a2a21a21137e5e2ddbd3bd31fffad757108e"
 dependencies = [
  "anyhow",
  "llzk-sys-build-support",
@@ -550,7 +550,7 @@ dependencies = [
 [[package]]
 name = "llzk-sys-build-support"
 version = "1.0.1"
-source = "git+https://github.com/project-llzk/llzk-rs?branch=iangneal%2Ffunc-attr-support#d816cb0fcb06fd760dfe32a9c8ce584f68dd6394"
+source = "git+https://github.com/project-llzk/llzk-rs?branch=iangneal%2Ffunc-attr-support#7200a2a21a21137e5e2ddbd3bd31fffad757108e"
 dependencies = [
  "anyhow",
  "bindgen 0.71.1",

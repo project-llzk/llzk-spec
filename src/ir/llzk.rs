@@ -65,6 +65,22 @@ fn check_fqn<M>(name: &Identifier<M>, fqn: SymbolRefAttribute) -> bool {
     name_parts == fqn_parts
 }
 
+fn collect_function_input_names<'c, 'a>(
+    func: FuncDefOpRef<'c, 'a>,
+    source_offset: usize,
+    names: &mut HashSet<String>,
+) {
+    let arg_count = func
+        .function_type()
+        .map(|t| t.input_count())
+        .unwrap_or_default();
+    for n in source_offset..arg_count {
+        if let Some(name) = function_input_name(func, n) {
+            names.insert(name.to_string());
+        }
+    }
+}
+
 /// Attempts to extract an op of the given type if the fqn matches
 macro_rules! extract_target {
     ($op:ident, $name:expr, $of_ref:ty, $target:ident, $result:ident) => {
@@ -175,7 +191,7 @@ impl<'ctx, 'op> ContractTargetInfo<'ctx> for LlzkContractTarget<'ctx, 'op> {
             let t = unsafe { Type::from_raw(f.argument(source_idx).unwrap().r#type().to_raw()) };
 
             match name {
-                Some(name) => InputInfo::named(Box::leak(name.into_boxed_str()), t),
+                Some(name) => InputInfo::named(name, t),
                 None => InputInfo::unnamed(t),
             }
         })
@@ -192,11 +208,11 @@ impl<'ctx, 'op> ContractTargetInfo<'ctx> for LlzkContractTarget<'ctx, 'op> {
             op_ref.function_type().into_iter().flat_map(move |t| {
                 let count = t.result_count();
                 let names = names.clone();
-                (0..count).map(move |n| (n, t.result(n).unwrap(), names.get(n).cloned().flatten()))
+                (0..count).map(move |n| (t.result(n).unwrap(), names.get(n).copied().flatten()))
             })
         })
-        .map(|(_, t, name)| match name {
-            Some(name) => OutputInfo::named(Box::leak(name.into_boxed_str()), t),
+        .map(|(t, name)| match name {
+            Some(name) => OutputInfo::named(name, t),
             None => OutputInfo::unnamed(t),
         })
     }
@@ -614,7 +630,7 @@ fn collect_struct_contract_metadata<'c: 'a, 'a>(
     }
     metadata
         .visible_symbols
-        .extend(collect_function_input_names(struct_op));
+        .extend(collect_operation_input_names(struct_op));
 
     metadata
 }
@@ -649,7 +665,7 @@ fn collect_function_contract_metadata<'c: 'a, 'a>(
     }
     metadata
         .visible_symbols
-        .extend(collect_function_input_names(operation));
+        .extend(collect_operation_input_names(operation));
     metadata
         .visible_symbols
         .extend(collect_function_output_names(operation));
@@ -677,38 +693,19 @@ pub(crate) fn preferred_struct_input_func<'c: 'a, 'a>(
 /// Free functions contribute all named inputs. Struct targets contribute the
 /// names from the same preferred entrypoint used for contract lowering, skipping
 /// any leading struct operand.
-fn collect_function_input_names<'c: 'a, 'a>(
+fn collect_operation_input_names<'c: 'a, 'a>(
     operation: &impl OperationLike<'c, 'a>,
 ) -> HashSet<String> {
     let mut names = HashSet::new();
-    let collect = |func: FuncDefOpRef<'c, 'a>, names: &mut HashSet<String>| {
-        let arg_count = func
-            .function_type()
-            .map(|t| t.input_count())
-            .unwrap_or_default();
-        for n in 0..arg_count {
-            if let Some(name) = function_input_name(func, n) {
-                names.insert(name);
-            }
-        }
-    };
 
     if let Some(func) = FuncDefOpRef::from_option_raw(operation.to_raw()) {
-        collect(func, &mut names);
+        collect_function_input_names(func, 0, &mut names);
         return names;
     }
 
     if let Some(struct_op) = StructDefOpRef::from_option_raw(operation.to_raw()) {
         if let Some((func, source_offset)) = preferred_struct_input_func(struct_op) {
-            let arg_count = func
-                .function_type()
-                .map(|t| t.input_count())
-                .unwrap_or_default();
-            for n in source_offset..arg_count {
-                if let Some(name) = function_input_name(func, n) {
-                    names.insert(name);
-                }
-            }
+            collect_function_input_names(func, source_offset, &mut names);
         }
     }
 
@@ -718,12 +715,13 @@ fn collect_function_input_names<'c: 'a, 'a>(
 fn collect_function_output_names<'c: 'a, 'a>(
     operation: &impl OperationLike<'c, 'a>,
 ) -> HashSet<String> {
-    let mut names = HashSet::new();
-    let Some(func) = FuncDefOpRef::from_option_raw(operation.to_raw()) else {
-        return names;
-    };
-    names.extend(function_output_names(func).into_iter().flatten());
-    names
+    FuncDefOpRef::from_option_raw(operation.to_raw())
+        .map(function_output_names)
+        .unwrap_or_default()
+        .into_iter()
+        .flatten()
+        .map(str::to_string)
+        .collect()
 }
 
 /// Returns the user-facing name for a function input, if the IR exposes one.
@@ -734,25 +732,24 @@ fn collect_function_output_names<'c: 'a, 'a>(
 pub(crate) fn function_input_name<'c, 'a>(
     func: FuncDefOpRef<'c, 'a>,
     idx: usize,
-) -> Option<String> {
-    func.arg_name_attr(idx)
-        .ok()
-        .flatten()
-        .map(|a| a.value().to_string())
+) -> Option<&'c str> {
+    func.arg_name_attr(idx).ok().flatten().map(|a| a.value())
 }
 
-fn function_output_names<'c, 'a>(func: FuncDefOpRef<'c, 'a>) -> Vec<Option<String>> {
+pub(crate) fn function_output_name<'c, 'a>(
+    func: FuncDefOpRef<'c, 'a>,
+    idx: usize,
+) -> Option<&'c str> {
+    func.res_name_attr(idx).ok().flatten().map(|a| a.value())
+}
+
+fn function_output_names<'c, 'a>(func: FuncDefOpRef<'c, 'a>) -> Vec<Option<&'c str>> {
     let count = func
         .function_type()
         .map(|t| t.result_count())
         .unwrap_or_default();
     (0..count)
-        .map(|idx| {
-            func.res_name_attr(idx)
-                .ok()
-                .flatten()
-                .map(|a| a.value().to_string())
-        })
+        .map(|idx| function_output_name(func, idx))
         .collect()
 }
 

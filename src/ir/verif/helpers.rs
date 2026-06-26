@@ -4,7 +4,7 @@ use crate::{
     ast::{self, Span, Spanned, Visitable, Visitor},
     diagnostic::CompileError,
     ir::{
-        llzk::{LlzkContractTarget, function_input_name},
+        llzk::{LlzkContractTarget, function_input_name, function_output_name},
         verif::{
             SpecCodegen, TypedExpression, TypedIdentifier, TypedPredicateDecl,
             scope::{CodegenScope, ScopeData, ScopeTag},
@@ -495,13 +495,8 @@ impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
                     )
                 })?;
 
-            if let Some(output_name) = func
-                .res_name_attr(n)
-                .ok()
-                .flatten()
-                .map(|a| a.value().to_string())
-            {
-                let output_name_ident = self.create_ident(&output_name, span);
+            if let Some(output_name) = function_output_name(func, n) {
+                let output_name_ident = self.create_ident(output_name, span);
                 self.top_mut()
                     .bind_local(&output_name_ident, arg)
                     .map_err(|err| {
