@@ -4,7 +4,7 @@
     nixpkgs.follows = "llzk-pkgs/nixpkgs";
     flake-utils.follows = "llzk-pkgs/flake-utils";
     llzk-rs-pkgs = {
-      url = "github:project-llzk/llzk-rs/iangneal/func-attr-support";
+      url = "github:project-llzk/llzk-rs";
       inputs = {
         nixpkgs.follows = "llzk-pkgs/nixpkgs";
         flake-utils.follows = "llzk-pkgs/flake-utils";

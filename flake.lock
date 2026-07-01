@@ -39,11 +39,11 @@
         "release-helpers": "release-helpers"
       },
       "locked": {
-        "lastModified": 1782482574,
-        "narHash": "sha256-1xKfGMYwlFTed5HQIf9JboWYhrGBzW59YwOPMQG+Nhk=",
+        "lastModified": 1782790798,
+        "narHash": "sha256-59ddxLfpNKCaw4SJIdW2vvW+HtHZkFaP9ruTEyuRFI0=",
         "owner": "project-llzk",
         "repo": "llzk-lib",
-        "rev": "8ef7bcabf09b54c4fc926cff894f44458b8f8829",
+        "rev": "8d5fc3141d268475673bb1db69701c3d12c13435",
         "type": "github"
       },
       "original": {
@@ -94,16 +94,15 @@
         "rust-overlay": "rust-overlay"
       },
       "locked": {
-        "lastModified": 1782486452,
-        "narHash": "sha256-S87BXtKYb1Xr8QesGxdNQsZLIVxtNuZkjAerByI/Oug=",
+        "lastModified": 1782931177,
+        "narHash": "sha256-oxoGDp2VGInxBiUrlbk0czKcdmQdjM8h0OsOHiMq2Kw=",
         "owner": "project-llzk",
         "repo": "llzk-rs",
-        "rev": "7200a2a21a21137e5e2ddbd3bd31fffad757108e",
+        "rev": "1cd51de6f2ba91f6e94b9628367623ca7fa80730",
         "type": "github"
       },
       "original": {
         "owner": "project-llzk",
-        "ref": "iangneal/func-attr-support",
         "repo": "llzk-rs",
         "type": "github"
       }
