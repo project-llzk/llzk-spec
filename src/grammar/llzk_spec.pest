@@ -138,7 +138,11 @@ equality_expr = {
 }
 
 relational_expr = {
-    additive_expr ~ (rel_op ~ additive_expr)*
+    shift_expr ~ (rel_op ~ shift_expr)*
+}
+
+shift_expr = {
+    additive_expr ~ (shift_op ~ additive_expr)*
 }
 
 additive_expr = {
@@ -308,6 +312,11 @@ rel_op = {
   | ">="
   | "<"
   | ">"
+}
+
+shift_op = {
+    "<<"
+  | ">>"
 }
 
 add_op = {

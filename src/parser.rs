@@ -70,6 +70,7 @@ impl<'a, 'ctx> Lowerer<'a, 'ctx> {
             .op(Op::infix(Rule::and_op, Assoc::Left))
             .op(Op::infix(Rule::eq_op, Assoc::Left))
             .op(Op::infix(Rule::rel_op, Assoc::Left))
+            .op(Op::infix(Rule::shift_op, Assoc::Left))
             .op(Op::infix(Rule::add_op, Assoc::Left))
             .op(Op::infix(Rule::mul_op, Assoc::Left))
             .op(Op::infix(Rule::pow_op, Assoc::Right))
@@ -264,6 +265,7 @@ impl<'a, 'ctx> Lowerer<'a, 'ctx> {
             | Rule::logical_and_expr
             | Rule::equality_expr
             | Rule::relational_expr
+            | Rule::shift_expr
             | Rule::additive_expr
             | Rule::multiplicative_expr
             | Rule::power_expr
@@ -567,6 +569,8 @@ impl<'a, 'ctx> Lowerer<'a, 'ctx> {
             (Rule::rel_op, "<=") => BinaryOp::Le,
             (Rule::rel_op, ">") => BinaryOp::Gt,
             (Rule::rel_op, ">=") => BinaryOp::Ge,
+            (Rule::shift_op, "<<") => BinaryOp::Shl,
+            (Rule::shift_op, ">>") => BinaryOp::Shr,
             (Rule::add_op, "+") => BinaryOp::Add,
             (Rule::add_op, "-") => BinaryOp::Sub,
             (Rule::mul_op, "*") => BinaryOp::Mul,
@@ -698,6 +702,58 @@ predicate ok(x) { return x == 0; }
             panic!("expected multiplicative expression");
         };
         assert_eq!(*op, BinaryOp::Mul);
+    }
+
+    #[test]
+    fn preserves_shift_precedence() {
+        let source = "predicate p(a, b, c) = a + b << c";
+        let ctx = AstContext::new();
+        let document = parse_document(&ctx, "test.spec", source).expect("parse success");
+        let Item::Predicate(predicate) = &document.items()[0] else {
+            panic!("expected predicate");
+        };
+        predicate_body_as_expr!(
+            Expression::Binary {
+                op,
+                left,
+                right,
+                ..
+            },
+            predicate,
+            "expected shift expression"
+        );
+        assert_eq!(*op, BinaryOp::Shl);
+        assert!(matches!(right.as_ref(), Expression::Symbol(_)));
+        let Expression::Binary { op, .. } = left.as_ref() else {
+            panic!("expected additive expression");
+        };
+        assert_eq!(*op, BinaryOp::Add);
+    }
+
+    #[test]
+    fn shift_is_left_associative() {
+        let source = "predicate p(a, b, c) = a << b >> c";
+        let ctx = AstContext::new();
+        let document = parse_document(&ctx, "test.spec", source).expect("parse success");
+        let Item::Predicate(predicate) = &document.items()[0] else {
+            panic!("expected predicate");
+        };
+        predicate_body_as_expr!(
+            Expression::Binary {
+                op,
+                left,
+                right,
+                ..
+            },
+            predicate,
+            "expected shift expression"
+        );
+        assert_eq!(*op, BinaryOp::Shr);
+        assert!(matches!(right.as_ref(), Expression::Symbol(_)));
+        let Expression::Binary { op, .. } = left.as_ref() else {
+            panic!("expected left-associated shift expression");
+        };
+        assert_eq!(*op, BinaryOp::Shl);
     }
 
     #[test]

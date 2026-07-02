@@ -32,6 +32,10 @@ predicate bit_and(x, y, z) = x & y == z
 
 predicate pow(x, y, z) = x ** y == z
 
+predicate shl(x, y, z) = x << y == z
+
+predicate shr(x, y, z) = x >> y == z
+
 // CHECK-LABEL: module attributes {llzk.lang} {
 // CHECK-NEXT:    struct.def @Foo {
 // CHECK-NEXT:      struct.member @out : index
@@ -114,5 +118,15 @@ predicate pow(x, y, z) = x ** y == z
 // CHECK-NEXT:      %[[VAL_63:[0-9a-zA-Z_\.]+]] = felt.pow %[[VAL_60]], %[[VAL_61]] : !felt.type, !felt.type
 // CHECK-NEXT:      %[[VAL_64:[0-9a-zA-Z_\.]+]] = bool.cmp eq(%[[VAL_63]], %[[VAL_62]]) : !felt.type, !felt.type
 // CHECK-NEXT:      function.return %[[VAL_64]] : i1
+// CHECK-NEXT:    }
+// CHECK-NEXT:    function.def @shl(%[[VAL_65:[0-9a-zA-Z_\.]+]]: !felt.type, %[[VAL_66:[0-9a-zA-Z_\.]+]]: !felt.type, %[[VAL_67:[0-9a-zA-Z_\.]+]]: !felt.type) -> i1 attributes {function.allow_non_native_field_ops} {
+// CHECK-NEXT:      %[[VAL_68:[0-9a-zA-Z_\.]+]] = felt.shl %[[VAL_65]], %[[VAL_66]] : !felt.type, !felt.type
+// CHECK-NEXT:      %[[VAL_69:[0-9a-zA-Z_\.]+]] = bool.cmp eq(%[[VAL_68]], %[[VAL_67]]) : !felt.type, !felt.type
+// CHECK-NEXT:      function.return %[[VAL_69]] : i1
+// CHECK-NEXT:    }
+// CHECK-NEXT:    function.def @shr(%[[VAL_70:[0-9a-zA-Z_\.]+]]: !felt.type, %[[VAL_71:[0-9a-zA-Z_\.]+]]: !felt.type, %[[VAL_72:[0-9a-zA-Z_\.]+]]: !felt.type) -> i1 attributes {function.allow_non_native_field_ops} {
+// CHECK-NEXT:      %[[VAL_73:[0-9a-zA-Z_\.]+]] = felt.shr %[[VAL_70]], %[[VAL_71]] : !felt.type, !felt.type
+// CHECK-NEXT:      %[[VAL_74:[0-9a-zA-Z_\.]+]] = bool.cmp eq(%[[VAL_73]], %[[VAL_72]]) : !felt.type, !felt.type
+// CHECK-NEXT:      function.return %[[VAL_74]] : i1
 // CHECK-NEXT:    }
 // CHECK-NEXT:  }

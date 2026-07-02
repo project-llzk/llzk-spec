@@ -482,6 +482,16 @@ impl<'ast, 'ctx, 'blk> ast::Visitor<TypedExpression<'ast, 'ctx>> for SpecCodegen
                         let rhs = self.cast_if_necessary(rhs, self.ctx.felt_type(), location)?;
                         bool::ge(location, lhs, rhs)?
                     }
+                    Shl => {
+                        let lhs = self.cast_if_necessary(lhs, self.ctx.felt_type(), location)?;
+                        let rhs = self.cast_if_necessary(rhs, self.ctx.felt_type(), location)?;
+                        felt::shl(location, lhs, rhs)?
+                    }
+                    Shr => {
+                        let lhs = self.cast_if_necessary(lhs, self.ctx.felt_type(), location)?;
+                        let rhs = self.cast_if_necessary(rhs, self.ctx.felt_type(), location)?;
+                        felt::shr(location, lhs, rhs)?
+                    }
                     Add => {
                         let lhs = self.cast_if_necessary(lhs, self.ctx.felt_type(), location)?;
                         let rhs = self.cast_if_necessary(rhs, self.ctx.felt_type(), location)?;
