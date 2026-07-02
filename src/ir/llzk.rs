@@ -65,6 +65,7 @@ fn check_fqn<M>(name: &Identifier<M>, fqn: SymbolRefAttribute) -> bool {
     name_parts == fqn_parts
 }
 
+/// Adds all named inputs from `func` to `names`, starting at `source_offset`.
 fn collect_function_input_names<'c, 'a>(
     func: FuncDefOpRef<'c, 'a>,
     source_offset: usize,
@@ -712,6 +713,7 @@ fn collect_operation_input_names<'c: 'a, 'a>(
     names
 }
 
+/// Collects every named result exported by a function target.
 fn collect_function_output_names<'c: 'a, 'a>(
     operation: &impl OperationLike<'c, 'a>,
 ) -> HashSet<String> {
@@ -727,8 +729,7 @@ fn collect_function_output_names<'c: 'a, 'a>(
 /// Returns the user-facing name for a function input, if the IR exposes one.
 ///
 /// Unnamed arguments remain addressable through spec-side `$arg[N]` syntax, so
-/// this only reports names backed by the canonical `function.arg_name`
-/// attribute.
+/// this only reports names backed by the argument name attribute.
 pub(crate) fn function_input_name<'c, 'a>(
     func: FuncDefOpRef<'c, 'a>,
     idx: usize,
@@ -736,6 +737,10 @@ pub(crate) fn function_input_name<'c, 'a>(
     func.arg_name_attr(idx).ok().flatten().map(|a| a.value())
 }
 
+/// Returns the user-facing name for a function result, if the IR exposes one.
+///
+/// Unnamed results remain addressable through spec-side `$res[N]` syntax, so
+/// this only reports names backed by the result name attribute.
 pub(crate) fn function_output_name<'c, 'a>(
     func: FuncDefOpRef<'c, 'a>,
     idx: usize,
@@ -743,6 +748,10 @@ pub(crate) fn function_output_name<'c, 'a>(
     func.res_name_attr(idx).ok().flatten().map(|a| a.value())
 }
 
+/// Returns the result-name table for `func`, preserving positional indexing.
+///
+/// Each element corresponds to one function result and is `None` when the
+/// result does not carry a result name attribute.
 fn function_output_names<'c, 'a>(func: FuncDefOpRef<'c, 'a>) -> Vec<Option<&'c str>> {
     let count = func
         .function_type()

@@ -51,9 +51,9 @@ not receive generated spec names.
 `old(expr)` is only valid inside a `step` expression. `step` and `old` are contextual
 syntax rather than globally reserved identifiers.
 
-`$arg[N]` is a temporary escape hatch for unnamed LLZK function inputs. Keep the TODO
-in `src/verify.rs` in mind: future LLZK metadata may allow source argument names to
-replace most `$arg[N]` usage.
+`$arg[N]`/`$res[N]` is used to address the `N`-th (zero-indexed) LLZK function input/output
+regardless of if that argument/result carries an argument/result name attribute.
+Using a source-provided name attribute is preferred, but `$arg[N]`/`$res[N]` is always available.
 
 ## Tests
 
