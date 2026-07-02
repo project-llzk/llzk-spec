@@ -39,11 +39,11 @@
         "release-helpers": "release-helpers"
       },
       "locked": {
-        "lastModified": 1782790798,
-        "narHash": "sha256-59ddxLfpNKCaw4SJIdW2vvW+HtHZkFaP9ruTEyuRFI0=",
+        "lastModified": 1783025250,
+        "narHash": "sha256-swH1HrlS1r/DMTi0hntELN0UYuxePi70knUqkgWpPd8=",
         "owner": "project-llzk",
         "repo": "llzk-lib",
-        "rev": "8d5fc3141d268475673bb1db69701c3d12c13435",
+        "rev": "cab4c24f6cacd329a81081451bdc6b54ecf0563a",
         "type": "github"
       },
       "original": {
@@ -94,11 +94,11 @@
         "rust-overlay": "rust-overlay"
       },
       "locked": {
-        "lastModified": 1782931177,
-        "narHash": "sha256-oxoGDp2VGInxBiUrlbk0czKcdmQdjM8h0OsOHiMq2Kw=",
+        "lastModified": 1783025402,
+        "narHash": "sha256-uYFeaJLwtWKtcYMRJMnFWmZD+F/puFBnaURCbZ3PjM0=",
         "owner": "project-llzk",
         "repo": "llzk-rs",
-        "rev": "1cd51de6f2ba91f6e94b9628367623ca7fa80730",
+        "rev": "3338cdf5d913717b82b287ca8f4ddb46544ff9ab",
         "type": "github"
       },
       "original": {
@@ -223,11 +223,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1781850613,
-        "narHash": "sha256-UL/f++6fbg1MSC63NSynUVsww+DSay0N5TsbFzLZIsQ=",
+        "lastModified": 1782962170,
+        "narHash": "sha256-HsaK9yDDypMB2TPxAYz0mPKtmYhgNwFQa72b3Ko6kRE=",
         "owner": "oxalica",
         "repo": "rust-overlay",
-        "rev": "4baecb43a008cd004e5220a777e1724bd8d43e43",
+        "rev": "e3fa5cf86b93914b8f312b2a1ca14fbb139c655c",
         "type": "github"
       },
       "original": {

@@ -491,14 +491,13 @@ checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
 
 [[package]]
 name = "llzk"
-version = "0.5.0"
-source = "git+https://github.com/project-llzk/llzk-rs#1cd51de6f2ba91f6e94b9628367623ca7fa80730"
+version = "0.6.0"
+source = "git+https://github.com/project-llzk/llzk-rs#3338cdf5d913717b82b287ca8f4ddb46544ff9ab"
 dependencies = [
  "llzk-macro",
  "llzk-sys",
  "log",
  "melior",
- "melior-macro",
  "mlir-sys",
  "num-bigint",
  "paste",
@@ -507,7 +506,7 @@ dependencies = [
 [[package]]
 name = "llzk-macro"
 version = "0.3.0"
-source = "git+https://github.com/project-llzk/llzk-rs#1cd51de6f2ba91f6e94b9628367623ca7fa80730"
+source = "git+https://github.com/project-llzk/llzk-rs#3338cdf5d913717b82b287ca8f4ddb46544ff9ab"
 dependencies = [
  "convert_case",
  "proc-macro2",
@@ -539,8 +538,8 @@ dependencies = [
 
 [[package]]
 name = "llzk-sys"
-version = "30.0.0"
-source = "git+https://github.com/project-llzk/llzk-rs#1cd51de6f2ba91f6e94b9628367623ca7fa80730"
+version = "30.1.0"
+source = "git+https://github.com/project-llzk/llzk-rs#3338cdf5d913717b82b287ca8f4ddb46544ff9ab"
 dependencies = [
  "anyhow",
  "llzk-sys-build-support",
@@ -550,7 +549,7 @@ dependencies = [
 [[package]]
 name = "llzk-sys-build-support"
 version = "1.0.1"
-source = "git+https://github.com/project-llzk/llzk-rs#1cd51de6f2ba91f6e94b9628367623ca7fa80730"
+source = "git+https://github.com/project-llzk/llzk-rs#3338cdf5d913717b82b287ca8f4ddb46544ff9ab"
 dependencies = [
  "anyhow",
  "bindgen 0.71.1",
