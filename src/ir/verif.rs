@@ -20,7 +20,7 @@ use crate::{
     diagnostic::CompileError,
     ir::{
         Context, MlirTypeSystem,
-        llzk::{LlzkContractTarget, LlzkInfo},
+        llzk::{LlzkContractTarget, LlzkInfo, preferred_struct_input_func},
         verif::{
             helpers::{accept_in_new_scope, find_contract_target_on_module},
             scope::{CodegenScopeStack, ScopeData, ScopeTag},
@@ -152,27 +152,29 @@ impl<'ast, 'ctx, 'blk> ast::Visitor<TypedContractDecl<'ast, 'ctx>>
         })?;
 
         // Create a function def op pretending to be the contract for now.
-        let block = verif::contract(
+        let contract = verif::contract(
             self.builder(),
             location,
             name.value(),
             target.fully_qualified_name(),
-        )?
-        .body()?
-        .first_block()
-        .unwrap();
+        )?;
+        let block = contract.body()?.first_block().unwrap();
         self.push_tagged(block, ScopeTag::Contract);
         self.bind_template_consts(parent_op, decl, location)?;
         match target {
             LlzkContractTarget::Struct(target_op) => {
                 // Bind the members as `struct.readm` operations reading from argument #0
                 self.bind_members(target_op, location, Value::from(block.argument(0)?), decl)?;
-                // Bind the inputs from the rest of the arguments of the function.
-                self.bind_inputs(target_op.compute_func().unwrap(), block, Some(1), decl)?;
+                // Bind the inputs from the rest of the contract arguments.
+                if let Some((entrypoint, source_offset)) = preferred_struct_input_func(target_op) {
+                    self.bind_inputs(entrypoint, block, Some(source_offset), Some(1), decl)?;
+                } else {
+                    unreachable!("verified struct contract target must have a callable entrypoint");
+                }
             }
             LlzkContractTarget::Function(target_op) => {
                 // Bind the inputs (the first N arguments of the contract)
-                self.bind_inputs(target_op, block, None, decl)?;
+                self.bind_inputs(target_op, block, None, None, decl)?;
                 // Bind the outputs (the rest of the arguments of the contract)
                 self.bind_outputs(
                     target_op,
@@ -671,6 +673,9 @@ impl<'ast, 'ctx, 'blk> ast::Visitor<TypedExpression<'ast, 'ctx>> for SpecCodegen
             }
             Arg { index, span, .. } => self.scope.find_parameter(index).copied().map_err(|err| {
                 err.into_compile_error(&self.filename, Some(*span), format!("on argument #{index}"))
+            }),
+            Res { index, span, .. } => self.scope.find_output(index).copied().map_err(|err| {
+                err.into_compile_error(&self.filename, Some(*span), format!("on result #{index}"))
             }),
             Nondet { meta, .. } => self.insert_op_with_result(nondet(location, *meta)),
             Boolean { value, meta, .. } => {

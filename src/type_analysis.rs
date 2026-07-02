@@ -401,6 +401,7 @@ impl<'ctx, T> OutputInfo<'ctx, T> {
 pub struct MemberInfo<'ctx, T> {
     name: &'ctx str,
     r#type: T,
+    #[allow(unused)]
     public: bool,
 }
 

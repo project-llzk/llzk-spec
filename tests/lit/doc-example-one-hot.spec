@@ -3,16 +3,16 @@
 // END.
 
 contract for OneHotTemplate::OneHot {
-  ensure len(bits) == N && arg[0] <= N;
-  ensure forall i in 0..N, i == arg[0] ? bits[i] == 1 : bits[i] == 0;
+  ensure len(bits) == N && $arg[0] <= N;
+  ensure forall i in 0..N, i == $arg[0] ? bits[i] == 1 : bits[i] == 0;
 }
 
 contract for OneHotTemplate::OneHot {
-  ensure len(bits) == N && arg[0] <= N;
+  ensure len(bits) == N && $arg[0] <= N;
   ensure forall b in bits, b == 0 || b == 1;
   ensure exists b in bits, b == 1;
   ensure forall i in 0..(N-1), forall j in (i+1)..N, (bits[i] * bits[j]) == 0;
-  ensure bits[arg[0]] == 1;
+  ensure bits[$arg[0]] == 1;
 }
 
 predicate all_bits_boolean(bit_arr) {
@@ -20,11 +20,11 @@ predicate all_bits_boolean(bit_arr) {
 }
 
 contract for OneHotTemplate::OneHot {
-  ensure len(bits) == N && arg[0] <= N;
+  ensure len(bits) == N && $arg[0] <= N;
   ensure all_bits_boolean(bits);
   ensure exists b in bits, b == 1;
   ensure forall i in 0..(N-1), forall j in (i+1)..N, (bits[i] * bits[j]) == 0;
-  ensure bits[arg[0]] == 1;
+  ensure bits[$arg[0]] == 1;
 }
 
 // CHECK-DAG: "name": "OneHotTemplate::OneHot"

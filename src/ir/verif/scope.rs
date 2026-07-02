@@ -94,6 +94,7 @@ impl<'ctx, 'blk> ScopeData<'ctx, 'blk> {
         }
     }
 
+    #[allow(unused)]
     pub fn block(&self) -> BlockRef<'ctx, 'blk> {
         self.block
     }
@@ -126,7 +127,12 @@ pub type CodegenScope<'ast, 'ctx, 'blk> = Scope<
 impl<'ast, 'ctx, 'blk> CodegenScope<'ast, 'ctx, 'blk> {
     /// Appends the operation into the block.
     pub fn append_operation(&mut self, op: impl Into<Operation<'ctx>>) -> OperationRef<'ctx, 'blk> {
-        self.payload().block.append_operation(op.into())
+        let block = self.payload().block;
+        let op = op.into();
+        match block.terminator() {
+            Some(terminator) => block.insert_operation_before(terminator, op),
+            None => block.append_operation(op),
+        }
     }
 
     /// Appends the operation into the scope using MLIR's SymbolTable API to ensure that the

@@ -290,6 +290,7 @@ impl<'a, 'ctx> Lowerer<'a, 'ctx> {
                 })
             }
             Rule::arg_ref => self.arg_ref(pair),
+            Rule::res_ref => self.res_ref(pair),
             Rule::nondet_expr => Ok(Expression::Nondet {
                 span: self.span(pair.as_span()),
                 meta: (),
@@ -322,8 +323,7 @@ impl<'a, 'ctx> Lowerer<'a, 'ctx> {
         })
     }
 
-    /// Lowers `arg[N]`, a reference to an unnamed function argument (i.e., does
-    /// not have the `function.arg_name` attribute).
+    /// Lowers `$arg[N]`, a positional reference to a contract input argument.
     fn arg_ref(&self, pair: Pair<'a, Rule>) -> Result<Expression<'ctx>, Diagnostic> {
         let span = self.span(pair.as_span());
         let index_pair = pair.into_inner().next().expect("arg index");
@@ -335,6 +335,24 @@ impl<'a, 'ctx> Lowerer<'a, 'ctx> {
             )
         })?;
         Ok(Expression::Arg {
+            index,
+            span,
+            meta: (),
+        })
+    }
+
+    /// Lowers `$res[N]`, a positional reference to a contract output.
+    fn res_ref(&self, pair: Pair<'a, Rule>) -> Result<Expression<'ctx>, Diagnostic> {
+        let span = self.span(pair.as_span());
+        let index_pair = pair.into_inner().next().expect("res index");
+        let index = index_pair.as_str().parse::<usize>().map_err(|_| {
+            Diagnostic::new(
+                self.source_name,
+                format!("result index `{}` is too large", index_pair.as_str()),
+                Some(self.span(index_pair.as_span())),
+            )
+        })?;
+        Ok(Expression::Res {
             index,
             span,
             meta: (),
@@ -714,7 +732,7 @@ predicate ok(x) { return x == 0; }
 
     #[test]
     fn parses_argument_references() {
-        let source = "contract for Foo { ensure len(arg[0]) == arg[0][i]; }";
+        let source = "contract for Foo { ensure len($arg[0]) == $arg[0][i]; }";
         let ctx = AstContext::new();
         let document = parse_document(&ctx, "test.spec", source).expect("parse success");
         let Item::Contract(contract) = &document.items()[0] else {
@@ -735,6 +753,24 @@ predicate ok(x) { return x == 0; }
             panic!("expected indexed arg expression");
         };
         assert!(matches!(target.as_ref(), Expression::Arg { index: 0, .. }));
+    }
+
+    #[test]
+    fn parses_result_references() {
+        let source = "contract for Foo { ensure $res[0] == $res[1]; }";
+        let ctx = AstContext::new();
+        let document = parse_document(&ctx, "test.spec", source).expect("parse success");
+        let Item::Contract(contract) = &document.items()[0] else {
+            panic!("expected contract");
+        };
+        let Statement::Ensure { expression, .. } = &contract.body().statements()[0] else {
+            panic!("expected ensure statement");
+        };
+        let Expression::Binary { left, right, .. } = expression else {
+            panic!("expected equality expression");
+        };
+        assert!(matches!(left.as_ref(), Expression::Res { index: 0, .. }));
+        assert!(matches!(right.as_ref(), Expression::Res { index: 1, .. }));
     }
 
     #[test]

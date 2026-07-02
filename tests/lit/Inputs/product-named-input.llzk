@@ -1,0 +1,12 @@
+module attributes { llzk.lang } {
+  poly.template @tmpl {
+    struct.def @Prod {
+      struct.member @out : index
+      function.def @product(%arg0: index {function.arg_name = "input"}) -> !struct.type<@tmpl::@Prod<[]>> {
+        %self = struct.new : <@tmpl::@Prod<[]>>
+        struct.writem %self[@out] = %arg0 : <@tmpl::@Prod<[]>>, index
+        function.return %self : !struct.type<@tmpl::@Prod<[]>>
+      }
+    }
+  }
+}

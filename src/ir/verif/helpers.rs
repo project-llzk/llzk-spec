@@ -1,5 +1,16 @@
 //! Helper methods for emitting IR.
 
+use crate::{
+    ast::{self, Span, Spanned, Visitable, Visitor},
+    diagnostic::CompileError,
+    ir::{
+        llzk::{LlzkContractTarget, function_input_name, function_output_name},
+        verif::{
+            SpecCodegen, TypedExpression, TypedIdentifier, TypedPredicateDecl,
+            scope::{CodegenScope, ScopeData, ScopeTag},
+        },
+    },
+};
 use ::melior::ir::Block;
 use llzk::{
     affine::{AffineExpr, AffineMap},
@@ -16,25 +27,13 @@ use llzk::{
         TemplateOpLike as _, TemplateOpRef, TemplateSymbolBindingOpLike as _, is_felt_type,
         melior_dialects::scf,
     },
-    value_ext::{OwningValueRange, ValueRange},
+    value_ext::OwningValueRange,
 };
 use melior::{
     dialect::arith,
     ir::{
         BlockLike as _, BlockRef, Location, Module, Operation, OperationRef, Region,
         RegionLike as _, Type, TypeLike, Value, ValueLike,
-    },
-};
-
-use crate::{
-    ast::{self, Span, Spanned, Visitable, Visitor},
-    diagnostic::CompileError,
-    ir::{
-        llzk::LlzkContractTarget,
-        verif::{
-            SpecCodegen, TypedExpression, TypedIdentifier, TypedPredicateDecl,
-            scope::{CodegenScope, ScopeData, ScopeTag},
-        },
     },
 };
 
@@ -338,14 +337,11 @@ impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
             template_op
                 .const_binding_ops()
                 .into_iter()
-                .filter(|param_ops| param_ops.type_opt().is_some())
                 .try_for_each(|param_op| {
                     let symbol = param_op.sym_name();
-                    let read_value = self.insert_op_with_result(poly::read_const(
-                        location,
-                        symbol,
-                        param_op.type_opt().unwrap(),
-                    ))?;
+                    let ty = param_op.type_opt().unwrap_or_else(|| self.felt_type());
+                    let read_value =
+                        self.insert_op_with_result(poly::read_const(location, symbol, ty))?;
                     let name = self.create_ident(symbol, span);
                     self.scope
                         .top()
@@ -400,20 +396,21 @@ impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
         span: &dyn Spanned,
     ) -> Result<(), CompileError> {
         for member in struct_op.member_defs() {
+            let member_name = member.member_name().to_string();
             let op = r#struct::readm(
                 self.builder(),
                 location,
                 member.member_type(),
                 self_value,
-                member.member_name(),
+                &member_name,
             )?;
             let value = self.insert_op_with_result(op)?;
-            let name = self.create_ident(member.member_name(), span);
+            let name = self.create_ident(&member_name, span);
             self.top_mut().bind_local(&name, value).map_err(|err| {
                 err.into_compile_error(
                     &self.filename,
                     Some(span.span()),
-                    format!("while binding struct member '{}'", member.member_name()),
+                    format!("while binding struct member '{}'", member_name),
                 )
             })?;
         }
@@ -428,32 +425,45 @@ impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
         &mut self,
         func: FuncDefOpRef<'ctx, 'blk>,
         block: BlockRef<'ctx, 'blk>,
-        offset: Option<usize>,
+        source_offset: Option<usize>,
+        block_offset: Option<usize>,
         span: &dyn Spanned,
     ) -> Result<(), CompileError> {
-        let arg_count = func.function_type()?.input_count();
+        let source_offset = source_offset.unwrap_or_default();
+        let block_offset = block_offset.unwrap_or_default();
+        let arg_count = func
+            .function_type()?
+            .input_count()
+            .saturating_sub(source_offset);
         (0..arg_count).try_for_each(|n| -> Result<(), CompileError> {
-            let arg = Value::from(block.argument(n + offset.unwrap_or_default())?);
-
-            let name = match func
-                .argument_attr(n, "function.arg_name")
-                .and_then(|a| Ok(StringAttribute::try_from(a)?.value()))
-                .ok()
-            {
-                Some(arg_name) => self.create_ident(arg_name, span),
-                None => self.create_ident(&format!("$arg[{n}]"), span),
-            };
-
+            let arg = Value::from(block.argument(n + block_offset)?);
+            let source_idx = n + source_offset;
+            let positional_name = self.create_ident(&format!("$arg[{n}]"), span);
             self.scope
                 .top()
-                .bind_parameter(&name, arg, n)
+                .bind_parameter(&positional_name, arg, n)
                 .map_err(|err| {
                     err.into_compile_error(
                         &self.filename,
                         Some(span.span()),
                         format!("while binding argument #{n} of target"),
                     )
-                })
+                })?;
+
+            if let Some(arg_name) = function_input_name(func, source_idx) {
+                let arg_name_ident = self.create_ident(&arg_name, span);
+                self.top_mut()
+                    .bind_local(&arg_name_ident, arg)
+                    .map_err(|err| {
+                        err.into_compile_error(
+                            &self.filename,
+                            Some(span.span()),
+                            format!("while binding named argument '{arg_name}' of target"),
+                        )
+                    })?;
+            }
+
+            Ok(())
         })
     }
 
@@ -472,15 +482,33 @@ impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
         (0..arg_count).try_for_each(|n| -> Result<(), CompileError> {
             let arg = Value::from(block.argument(n + offset.unwrap_or_default())?);
 
-            let name = self.create_ident(&format!("$res[{n}]"), span);
+            let positional_name = self.create_ident(&format!("$res[{n}]"), span);
 
-            self.scope.top().bind_output(&name, arg, n).map_err(|err| {
-                err.into_compile_error(
-                    &self.filename,
-                    Some(span.span()),
-                    format!("while binding outptu #{n} of target"),
-                )
-            })
+            self.scope
+                .top()
+                .bind_output(&positional_name, arg, n)
+                .map_err(|err| {
+                    err.into_compile_error(
+                        &self.filename,
+                        Some(span.span()),
+                        format!("while binding output #{n} of target"),
+                    )
+                })?;
+
+            if let Some(output_name) = function_output_name(func, n) {
+                let output_name_ident = self.create_ident(output_name, span);
+                self.top_mut()
+                    .bind_local(&output_name_ident, arg)
+                    .map_err(|err| {
+                        err.into_compile_error(
+                            &self.filename,
+                            Some(span.span()),
+                            format!("while binding named output '{output_name}' of target"),
+                        )
+                    })?;
+            }
+
+            Ok(())
         })
     }
 

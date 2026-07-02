@@ -188,6 +188,7 @@ primary_expr = _{
   | boolean
   | number
   | arg_ref
+  | res_ref
   | identifier
   | "(" ~ expression ~ ")"
 }
@@ -227,7 +228,11 @@ nondet_expr = {
 }
 
 arg_ref = {
-    "arg" ~ "[" ~ number ~ "]"
+    "$arg" ~ "[" ~ number ~ "]"
+}
+
+res_ref = {
+    "$res" ~ "[" ~ number ~ "]"
 }
 
 boolean = {

@@ -3,7 +3,7 @@
 // END.
 
 contract for OneHotTemplate::OneHot {
-  ensure forall i in 0..N, i == arg[0] ? bits[i] == 1 : bits[i] == 0;
+  ensure forall i in 0..N, i == $arg[0] ? bits[i] == 1 : bits[i] == 0;
   ensure exists bit in bits, bit == 1;
 }
 

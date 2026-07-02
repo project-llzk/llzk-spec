@@ -1,0 +1,3 @@
+added:
+  - Support for `function.arg_name` argument names
+  - Support for `function.res_name` result names
