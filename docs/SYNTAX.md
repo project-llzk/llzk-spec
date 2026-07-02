@@ -77,7 +77,7 @@ contract for foo {
 ```
 
 If the LLZK IR carries a `function.res_name` attribute, that same output is also
-available by its bare name:
+available by its bare name (i.e. the name "out" below)::
 
 ```spec
 contract for foo {
