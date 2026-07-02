@@ -388,8 +388,8 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Expression<'ast>> for ExpressionTypeChec
             }
 
             //  env.parameters(n) : t
-            // -----------------------
-            //       arg(n) : t
+            // -------------------------
+            //       $arg[n] : t
             Expression::Arg { index, span, .. } => {
                 diags.add_unless(
                     self.cfg.allows_arg,
@@ -401,6 +401,26 @@ impl<'ast, 'ctx, T: TypeSystem> Visitor<Expression<'ast>> for ExpressionTypeChec
                         || format!("on argument #{index}"),
                     )
                     .map(|t| Expression::Arg {
+                        index: *index,
+                        span: *span,
+                        meta: t,
+                    })
+            }
+
+            //  env.outputs(n) : t
+            // ----------------------
+            //      $res[n] : t
+            Expression::Res { index, span, .. } => {
+                diags.add_unless(
+                    self.cfg.allows_arg,
+                    || "res expression is not allowed in this context",
+                );
+                diags
+                    .to_typing_result_if_clean(
+                        || self.ctx.scope().find_output(index).cloned(),
+                        || format!("on result #{index}"),
+                    )
+                    .map(|t| Expression::Res {
                         index: *index,
                         span: *span,
                         meta: t,

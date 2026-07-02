@@ -7,7 +7,7 @@ contract for IsZero::IsZero {
 }
 
 contract for IsZero::IsZero {
-  ensure arg[0] == 0 ? out == 1 : out == 0;
+  ensure $arg[0] == 0 ? out == 1 : out == 0;
 }
 
 // CHECK-DAG: "name": "IsZero::IsZero"

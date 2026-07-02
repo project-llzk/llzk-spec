@@ -7,7 +7,7 @@ contract for Num2Bits::Num2Bits {
     decreases n - i;
     step lc1 == old(lc1) + out[i] * e2;
     ensure out[i] == 0 || out[i] == 1;
-    ensure arg[0] & (2 ** i) == out[i] * (2 ** i);
+    ensure $arg[0] & (2 ** i) == out[i] * (2 ** i);
   }
 }
 

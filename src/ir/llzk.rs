@@ -9,7 +9,7 @@ use crate::diagnostic::CompileError;
 use crate::ir::MlirTypeSystem;
 use crate::type_analysis::loops::{LoopInfo, LoopLabel};
 use crate::type_analysis::{
-    CircuitInfo, ContractTargetInfo, InputInfo, MemberInfo, OutputInfo, ParamInfo, TypeSystem,
+    CircuitInfo, ContractTargetInfo, InputInfo, MemberInfo, OutputInfo, ParamInfo,
 };
 use llzk::dialect::{
     array::ArrayType,
@@ -19,16 +19,15 @@ use llzk::dialect::{
 };
 use llzk::operation::WalkOperationMutLike;
 use llzk::prelude::{
-    FuncDefOpRef, FuncDefOpRefMut, PodType, StructDefOpRef, SymbolRefAttribute, TemplateOpLike,
-    TemplateOpRef, TemplateSymbolBindingOpLike as _,
+    FuncDefOpRef, FuncDefOpRefMut, OperationMutLike, PodType, StructDefOpRef, SymbolRefAttribute,
+    TemplateOpLike, TemplateOpRef, TemplateSymbolBindingOpLike as _,
 };
-use melior::ir::{BlockLike, RegionLike, TypeLike as _, ValueLike};
 use melior::ir::{
     Module, OperationRef, Type,
-    attribute::FlatSymbolRefAttribute,
-    attribute::StringAttribute,
+    attribute::{FlatSymbolRefAttribute, StringAttribute},
     operation::{OperationLike, WalkOrder, WalkResult},
 };
+use melior::ir::{TypeLike as _, ValueLike};
 use mlir_sys::mlirOperationGetParentOperation;
 use std::collections::{HashMap, HashSet};
 
@@ -64,6 +63,23 @@ fn check_fqn<M>(name: &Identifier<M>, fqn: SymbolRefAttribute) -> bool {
         .collect::<Vec<_>>();
 
     name_parts == fqn_parts
+}
+
+/// Adds all named inputs from `func` to `names`, starting at `source_offset`.
+fn collect_function_input_names<'c, 'a>(
+    func: FuncDefOpRef<'c, 'a>,
+    source_offset: usize,
+    names: &mut HashSet<String>,
+) {
+    let arg_count = func
+        .function_type()
+        .map(|t| t.input_count())
+        .unwrap_or_default();
+    for n in source_offset..arg_count {
+        if let Some(name) = function_input_name(func, n) {
+            names.insert(name.to_string());
+        }
+    }
 }
 
 /// Attempts to extract an op of the given type if the fqn matches
@@ -162,23 +178,18 @@ impl<'ctx, 'op> ContractTargetInfo<'ctx> for LlzkContractTarget<'ctx, 'op> {
     type TypeSystem = MlirTypeSystem<'ctx, 'op>;
 
     fn inputs(&self) -> impl Iterator<Item = InputInfo<'ctx, Type<'ctx>>> {
-        let f = match self {
-            Self::Struct(op) => op.compute_func(),
-            Self::Function(op) => Some(*op),
-        }
-        .unwrap();
+        let (f, source_offset) = match self {
+            Self::Struct(op) => preferred_struct_input_func(*op).unwrap(),
+            Self::Function(op) => (*op, 0),
+        };
         let arg_count = f
-            .region(0)
-            .unwrap()
-            .first_block()
-            .map(|block| block.argument_count())
+            .function_type()
+            .map(|t| t.input_count().saturating_sub(source_offset))
             .unwrap_or_default();
         (0..arg_count).map(move |n| {
-            let name = f
-                .argument_attr(n, "function.arg_name")
-                .and_then(|a| Ok(StringAttribute::try_from(a)?.value()))
-                .ok();
-            let t = unsafe { Type::from_raw(f.argument(n).unwrap().r#type().to_raw()) };
+            let source_idx = n + source_offset;
+            let name = function_input_name(f, source_idx);
+            let t = unsafe { Type::from_raw(f.argument(source_idx).unwrap().r#type().to_raw()) };
 
             match name {
                 Some(name) => InputInfo::named(name, t),
@@ -193,13 +204,18 @@ impl<'ctx, 'op> ContractTargetInfo<'ctx> for LlzkContractTarget<'ctx, 'op> {
             LlzkContractTarget::Function(op_ref) => Some(op_ref),
         }
         .into_iter()
-        .flat_map(|op_ref| op_ref.function_type())
-        .flat_map(|t| {
-            let count = t.result_count();
-            (0..count).map(move |n| t.result(n).unwrap())
+        .flat_map(|op_ref| {
+            let names = function_output_names(*op_ref);
+            op_ref.function_type().into_iter().flat_map(move |t| {
+                let count = t.result_count();
+                let names = names.clone();
+                (0..count).map(move |n| (t.result(n).unwrap(), names.get(n).copied().flatten()))
+            })
         })
-        // TODO: Try extract `function.res_name` for the output if available.
-        .map(OutputInfo::unnamed)
+        .map(|(t, name)| match name {
+            Some(name) => OutputInfo::named(name, t),
+            None => OutputInfo::unnamed(t),
+        })
     }
 
     fn members(&self) -> impl Iterator<Item = MemberInfo<'ctx, Type<'ctx>>> {
@@ -240,7 +256,7 @@ impl<'ctx, 'op> ContractTargetInfo<'ctx> for LlzkContractTarget<'ctx, 'op> {
             .map(|op| match op.kind {
                 LoopKind::For => LoopInfo::new_for_loop(
                     op.label(),
-                    |_| ts.felt_type(),
+                    |_| ts.index_type(),
                     op.extra_operands_types(),
                 ),
                 LoopKind::While => LoopInfo::new_while_loop(op.label(), op.extra_operands_types()),
@@ -314,7 +330,23 @@ impl<'ctx, 'blk> LlzkLoopTarget<'ctx, 'blk> {
             })
             .map(|v| v.r#type())
     }
+
+    /// Adds the loop label to the targeted loop if it wasn't present during analysis and had to
+    /// be inferred.
+    ///
+    /// The verif.invariant operation expects the label is present during verification.
+    pub fn ensure_label_is_present(&mut self) {
+        if self.has_attribute("loop_label") {
+            return;
+        }
+        let label = LoopLabel::implicit(self.idx);
+        let context = self.context();
+        let label = StringAttribute::new(unsafe { context.to_ref() }, &label.to_string());
+        self.set_attribute("loop_label", label.into());
+    }
 }
+
+impl<'ctx, 'op> OperationMutLike<'ctx, 'op> for LlzkLoopTarget<'ctx, 'op> {}
 
 impl<'ctx, 'op> OperationLike<'ctx, 'op> for LlzkLoopTarget<'ctx, 'op> {
     fn to_raw(&self) -> mlir_sys::MlirOperation {
@@ -447,8 +479,6 @@ fn extract_metadata(
             if is_func_def(&operation)
                 && let Some(function_name) = string_attribute(&operation, "sym_name")
             {
-                // TODO: Once we add `function.arg_name` attributes, we will collect
-                // those here as well.
                 let target = function_contract_target_name(&operation, &function_name);
                 metadata.global_symbols.insert(target.clone());
                 // Function may already be visible if it is a struct method, hence the check
@@ -599,6 +629,9 @@ fn collect_struct_contract_metadata<'c: 'a, 'a>(
     {
         metadata.visible_symbols.insert(flat_symbol_name(name));
     }
+    metadata
+        .visible_symbols
+        .extend(collect_operation_input_names(struct_op));
 
     metadata
 }
@@ -632,6 +665,101 @@ fn collect_function_contract_metadata<'c: 'a, 'a>(
         }
     }
     metadata
+        .visible_symbols
+        .extend(collect_operation_input_names(operation));
+    metadata
+        .visible_symbols
+        .extend(collect_function_output_names(operation));
+    metadata
+}
+
+/// Returns the struct entrypoint whose arguments should be exposed to specs.
+///
+/// Struct contracts prefer `constrain` when present because it carries the
+/// concrete runtime inputs plus the leading struct operand. Product-only structs
+/// expose the `product` inputs directly. As a final fallback, `compute` inputs
+/// are used.
+pub(crate) fn preferred_struct_input_func<'c: 'a, 'a>(
+    struct_op: StructDefOpRef<'c, 'a>,
+) -> Option<(FuncDefOpRef<'c, 'a>, usize)> {
+    struct_op
+        .constrain_func()
+        .map(|func| (func, 1))
+        .or_else(|| struct_op.product_func().map(|func| (func, 0)))
+        .or_else(|| struct_op.compute_func().map(|func| (func, 0)))
+}
+
+/// Collects every spec-visible input name exported by the given callable target.
+///
+/// Free functions contribute all named inputs. Struct targets contribute the
+/// names from the same preferred entrypoint used for contract lowering, skipping
+/// any leading struct operand.
+fn collect_operation_input_names<'c: 'a, 'a>(
+    operation: &impl OperationLike<'c, 'a>,
+) -> HashSet<String> {
+    let mut names = HashSet::new();
+
+    if let Some(func) = FuncDefOpRef::from_option_raw(operation.to_raw()) {
+        collect_function_input_names(func, 0, &mut names);
+        return names;
+    }
+
+    if let Some(struct_op) = StructDefOpRef::from_option_raw(operation.to_raw()) {
+        if let Some((func, source_offset)) = preferred_struct_input_func(struct_op) {
+            collect_function_input_names(func, source_offset, &mut names);
+        }
+    }
+
+    names
+}
+
+/// Collects every named result exported by a function target.
+fn collect_function_output_names<'c: 'a, 'a>(
+    operation: &impl OperationLike<'c, 'a>,
+) -> HashSet<String> {
+    FuncDefOpRef::from_option_raw(operation.to_raw())
+        .map(function_output_names)
+        .unwrap_or_default()
+        .into_iter()
+        .flatten()
+        .map(str::to_string)
+        .collect()
+}
+
+/// Returns the user-facing name for a function input, if the IR exposes one.
+///
+/// Unnamed arguments remain addressable through spec-side `$arg[N]` syntax, so
+/// this only reports names backed by the argument name attribute.
+pub(crate) fn function_input_name<'c, 'a>(
+    func: FuncDefOpRef<'c, 'a>,
+    idx: usize,
+) -> Option<&'c str> {
+    func.arg_name_attr(idx).ok().flatten().map(|a| a.value())
+}
+
+/// Returns the user-facing name for a function result, if the IR exposes one.
+///
+/// Unnamed results remain addressable through spec-side `$res[N]` syntax, so
+/// this only reports names backed by the result name attribute.
+pub(crate) fn function_output_name<'c, 'a>(
+    func: FuncDefOpRef<'c, 'a>,
+    idx: usize,
+) -> Option<&'c str> {
+    func.res_name_attr(idx).ok().flatten().map(|a| a.value())
+}
+
+/// Returns the result-name table for `func`, preserving positional indexing.
+///
+/// Each element corresponds to one function result and is `None` when the
+/// result does not carry a result name attribute.
+fn function_output_names<'c, 'a>(func: FuncDefOpRef<'c, 'a>) -> Vec<Option<&'c str>> {
+    let count = func
+        .function_type()
+        .map(|t| t.result_count())
+        .unwrap_or_default();
+    (0..count)
+        .map(|idx| function_output_name(func, idx))
+        .collect()
 }
 
 /// Collect member reference paths to populate `member_paths`, using `root` as

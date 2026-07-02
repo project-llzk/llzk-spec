@@ -29,7 +29,7 @@ A contract is the top-level specification for an LLZK symbol:
 ```spec
 contract for IsZero::IsZero {
   ensure out == 0 || out == 1;
-  ensure arg[0] == 0 ? out == 1 : out == 0;
+  ensure $arg[0] == 0 ? out == 1 : out == 0;
 }
 ```
 
@@ -38,8 +38,10 @@ template-generated or nested IR, authors use fully qualified LLZK names such as
 `IsZero::IsZero`, `Num2Bits::Num2Bits`, or `tmpl::empty`.
 
 Inside a contract, bare names are resolved against the symbols visible from that
-target. This includes public members, visible template parameters, visible
-`poly.expr` names, and local bindings introduced by the spec.
+target. This includes public members, visible template parameters, LLZK inputs
+that carry `function.arg_name`, visible `poly.expr` names, and local bindings
+introduced by the spec. Contract inputs are also always addressable
+positionally with `$arg[N]`.
 
 ## Requirements And Ensures
 
@@ -49,7 +51,7 @@ target. This includes public members, visible template parameters, visible
 contract for LessThan::LessThan {
   require n <= 252;
   ensure out == 0 || out == 1;
-  ensure out == 1 ? arg[0][0] < arg[0][1] : arg[0][0] >= arg[0][1];
+  ensure out == 1 ? $arg[0][0] < $arg[0][1] : $arg[0][0] >= $arg[0][1];
 }
 ```
 
@@ -111,7 +113,7 @@ not a value expression.
 
 ```spec
 contract for Foo {
-  let bit_i = (arg[0] & (2 ** i)) != 0 ? 1 : 0;
+  let bit_i = ($arg[0] & (2 ** i)) != 0 ? 1 : 0;
   ensure bit_i == out[i];
 }
 ```
@@ -144,16 +146,19 @@ Names resolve from most local to least local:
 LLZK symbols are the source of truth. If a source language renames or specializes
 constructs during compilation, the spec must use the LLZK-visible name.
 
-Unnamed function arguments can be referenced with `arg[N]`:
+Contract inputs can always be referenced with `$arg[N]`:
 
 ```spec
 contract for IsZero::IsZero {
-  ensure arg[0] == 0 ? out == 1 : out == 0;
+  ensure $arg[0] == 0 ? out == 1 : out == 0;
 }
 ```
 
-`arg[N]` is a workaround since LLZK currently does not assign symbol names to function arguments,
-but will be addressed in a future LLZK release.
+If the LLZK IR also carries `function.arg_name`, that same input may be
+referenced by its bare name as well.
+
+Likewise, free-function outputs may be named by `function.res_name`, making
+that output available both as a bare name and positionally as `$res[N]`.
 
 ## Members And Visibility
 
@@ -183,7 +188,7 @@ Quantifiers are expressions:
 
 ```spec
 contract for OneHotTemplate::OneHot {
-  ensure forall i in 0..N, i == arg[0] ? bits[i] == 1 : bits[i] == 0;
+  ensure forall i in 0..N, i == $arg[0] ? bits[i] == 1 : bits[i] == 0;
   ensure exists bit in bits, bit == 1;
 }
 ```

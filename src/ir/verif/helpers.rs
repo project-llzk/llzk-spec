@@ -1,34 +1,39 @@
 //! Helper methods for emitting IR.
 
-use ::melior::ir::Block;
-use llzk::{
-    builder::{OpBuilder, OpBuilderLike},
-    dialect::{
-        cast, function,
-        poly::{self, unifiable_cast},
-        r#struct,
-    },
-    prelude::{
-        FlatSymbolRefAttribute, FuncDefOp, FuncDefOpLike as _, FuncDefOpRef, FunctionType,
-        LlzkContext, MemberDefOpLike as _, OperationLike as _, StringAttribute,
-        StructDefOpLike as _, StructDefOpRef, SymbolRefAttribute, TemplateOpLike as _,
-        TemplateOpRef, TemplateSymbolBindingOpLike as _, is_felt_type, melior_dialects::scf,
-    },
-};
-use melior::ir::{
-    BlockLike as _, BlockRef, Location, Module, OperationRef, Region, RegionLike as _, Type,
-    TypeLike, Value, ValueLike,
-};
-
 use crate::{
     ast::{self, Span, Spanned, Visitable, Visitor},
     diagnostic::CompileError,
     ir::{
-        llzk::LlzkContractTarget,
+        llzk::{LlzkContractTarget, function_input_name, function_output_name},
         verif::{
             SpecCodegen, TypedExpression, TypedIdentifier, TypedPredicateDecl,
             scope::{CodegenScope, ScopeData, ScopeTag},
         },
+    },
+};
+use ::melior::ir::Block;
+use llzk::{
+    affine::{AffineExpr, AffineMap},
+    builder::{OpBuilder, OpBuilderLike},
+    dialect::{
+        array, cast, function,
+        poly::{self, unifiable_cast},
+        r#struct,
+    },
+    prelude::{
+        ArrayType, FlatSymbolRefAttribute, FuncDefOp, FuncDefOpLike as _, FuncDefOpRef,
+        FunctionType, IntegerAttribute, LlzkContext, MemberDefOpLike as _, OperationLike as _,
+        StringAttribute, StructDefOpLike as _, StructDefOpRef, SymbolRefAttribute,
+        TemplateOpLike as _, TemplateOpRef, TemplateSymbolBindingOpLike as _, is_felt_type,
+        melior_dialects::scf,
+    },
+    value_ext::OwningValueRange,
+};
+use melior::{
+    dialect::arith,
+    ir::{
+        BlockLike as _, BlockRef, Location, Module, Operation, OperationRef, Region,
+        RegionLike as _, Type, TypeLike, Value, ValueLike,
     },
 };
 
@@ -125,7 +130,7 @@ impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
     pub fn push(&mut self, block: BlockRef<'ctx, 'blk>) {
         let previous = self.builder().save_insertion_point();
         self.scope.push(ScopeData::new(block, previous));
-        self.builder().set_insertion_point_at_end(block);
+        self.builder().set_insertion_point_at_start(block);
     }
 
     /// Pushes a new tagged scope.
@@ -137,17 +142,17 @@ impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
         let previous = self.builder().save_insertion_point();
         self.scope
             .push(ScopeData::new_with_tag(block, previous, tag));
-        self.builder().set_insertion_point_at_end(block);
+        self.builder().set_insertion_point_at_start(block);
     }
 
     /// Pops the top of the scope stack.
     ///
     /// Sets the insertion point of the builder to the end of the block on the new top.
     pub fn pop(&mut self) {
-        self.scope.pop();
         if let Some(previous) = self.scope.top().payload().previous() {
             self.builder().restore_insertion_point(previous);
         }
+        self.scope.pop();
     }
 
     /// Returns the tag closest to the top of the stack.
@@ -242,16 +247,14 @@ impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
             expr,
             |mut result, scope: &mut Self| {
                 if result.r#type() != expected_type {
-                    result = scope
-                        .top_mut()
-                        .append_operation_with_result(unifiable_cast(
-                            location,
-                            result,
-                            expected_type,
-                        ))?;
+                    result = scope.insert_op_with_result(unifiable_cast(
+                        location,
+                        result,
+                        expected_type,
+                    ))?;
                 }
                 let op = scf::r#yield(&[result], location);
-                scope.top_mut().append_operation(op);
+                scope.insert_op(op);
                 Ok(result)
             },
             None,
@@ -334,17 +337,11 @@ impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
             template_op
                 .const_binding_ops()
                 .into_iter()
-                .filter(|param_ops| param_ops.type_opt().is_some())
                 .try_for_each(|param_op| {
                     let symbol = param_op.sym_name();
+                    let ty = param_op.type_opt().unwrap_or_else(|| self.felt_type());
                     let read_value =
-                        self.scope
-                            .top()
-                            .append_operation_with_result(poly::read_const(
-                                location,
-                                symbol,
-                                param_op.type_opt().unwrap(),
-                            ))?;
+                        self.insert_op_with_result(poly::read_const(location, symbol, ty))?;
                     let name = self.create_ident(symbol, span);
                     self.scope
                         .top()
@@ -361,6 +358,33 @@ impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
         Ok(())
     }
 
+    /// Inserts the given operation using the builder and returns a single value.
+    ///
+    /// Fails if the op has no values or more than one value.
+    pub fn insert_op_with_result(
+        &self,
+        op: impl Into<Operation<'ctx>>,
+    ) -> Result<Value<'ctx, 'blk>, CompileError> {
+        let op = op.into();
+        let location = op.location();
+        let op_ref = self.builder().insert(location, |_, _| op);
+        if op_ref.result_count() != 1 {
+            return Err(CompileError::Ir(format!(
+                "expected operation '{op_ref}' to have 1 result but has {}",
+                op_ref.result_count()
+            )));
+        }
+        // To avoid a lifetime error.
+        Ok(unsafe { Value::from_raw(op_ref.result(0)?.to_raw()) })
+    }
+
+    /// Inserts the given operation using the builder.
+    pub fn insert_op(&self, op: impl Into<Operation<'ctx>>) {
+        let op = op.into();
+        let location = op.location();
+        self.builder().insert(location, |_, _| op);
+    }
+
     /// Binds the member definitions of the given `struct.def` op to locals in the scope.
     ///
     /// The bound value is the result of a `struct.readm` operation reading the member.
@@ -372,20 +396,21 @@ impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
         span: &dyn Spanned,
     ) -> Result<(), CompileError> {
         for member in struct_op.member_defs() {
+            let member_name = member.member_name().to_string();
             let op = r#struct::readm(
                 self.builder(),
                 location,
                 member.member_type(),
                 self_value,
-                member.member_name(),
+                &member_name,
             )?;
-            let value = self.scope.top().append_operation_with_result(op)?;
-            let name = self.create_ident(member.member_name(), span);
-            self.scope.top().bind_local(&name, value).map_err(|err| {
+            let value = self.insert_op_with_result(op)?;
+            let name = self.create_ident(&member_name, span);
+            self.top_mut().bind_local(&name, value).map_err(|err| {
                 err.into_compile_error(
                     &self.filename,
                     Some(span.span()),
-                    format!("while binding struct member '{}'", member.member_name()),
+                    format!("while binding struct member '{}'", member_name),
                 )
             })?;
         }
@@ -400,32 +425,45 @@ impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
         &mut self,
         func: FuncDefOpRef<'ctx, 'blk>,
         block: BlockRef<'ctx, 'blk>,
-        offset: Option<usize>,
+        source_offset: Option<usize>,
+        block_offset: Option<usize>,
         span: &dyn Spanned,
     ) -> Result<(), CompileError> {
-        let arg_count = func.function_type()?.input_count();
+        let source_offset = source_offset.unwrap_or_default();
+        let block_offset = block_offset.unwrap_or_default();
+        let arg_count = func
+            .function_type()?
+            .input_count()
+            .saturating_sub(source_offset);
         (0..arg_count).try_for_each(|n| -> Result<(), CompileError> {
-            let arg = Value::from(block.argument(n + offset.unwrap_or_default())?);
-
-            let name = match func
-                .argument_attr(n, "function.arg_name")
-                .and_then(|a| Ok(StringAttribute::try_from(a)?.value()))
-                .ok()
-            {
-                Some(arg_name) => self.create_ident(arg_name, span),
-                None => self.create_ident(&format!("$arg[{n}]"), span),
-            };
-
+            let arg = Value::from(block.argument(n + block_offset)?);
+            let source_idx = n + source_offset;
+            let positional_name = self.create_ident(&format!("$arg[{n}]"), span);
             self.scope
                 .top()
-                .bind_parameter(&name, arg, n)
+                .bind_parameter(&positional_name, arg, n)
                 .map_err(|err| {
                     err.into_compile_error(
                         &self.filename,
                         Some(span.span()),
                         format!("while binding argument #{n} of target"),
                     )
-                })
+                })?;
+
+            if let Some(arg_name) = function_input_name(func, source_idx) {
+                let arg_name_ident = self.create_ident(&arg_name, span);
+                self.top_mut()
+                    .bind_local(&arg_name_ident, arg)
+                    .map_err(|err| {
+                        err.into_compile_error(
+                            &self.filename,
+                            Some(span.span()),
+                            format!("while binding named argument '{arg_name}' of target"),
+                        )
+                    })?;
+            }
+
+            Ok(())
         })
     }
 
@@ -444,15 +482,33 @@ impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
         (0..arg_count).try_for_each(|n| -> Result<(), CompileError> {
             let arg = Value::from(block.argument(n + offset.unwrap_or_default())?);
 
-            let name = self.create_ident(&format!("$res[{n}]"), span);
+            let positional_name = self.create_ident(&format!("$res[{n}]"), span);
 
-            self.scope.top().bind_output(&name, arg, n).map_err(|err| {
-                err.into_compile_error(
-                    &self.filename,
-                    Some(span.span()),
-                    format!("while binding outptu #{n} of target"),
-                )
-            })
+            self.scope
+                .top()
+                .bind_output(&positional_name, arg, n)
+                .map_err(|err| {
+                    err.into_compile_error(
+                        &self.filename,
+                        Some(span.span()),
+                        format!("while binding output #{n} of target"),
+                    )
+                })?;
+
+            if let Some(output_name) = function_output_name(func, n) {
+                let output_name_ident = self.create_ident(output_name, span);
+                self.top_mut()
+                    .bind_local(&output_name_ident, arg)
+                    .map_err(|err| {
+                        err.into_compile_error(
+                            &self.filename,
+                            Some(span.span()),
+                            format!("while binding named output '{output_name}' of target"),
+                        )
+                    })?;
+            }
+
+            Ok(())
         })
     }
 
@@ -462,7 +518,7 @@ impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
         target: LlzkContractTarget<'ctx, 'blk>,
         span: &dyn Spanned,
     ) -> Result<(), CompileError> {
-        for loop_target in target.loops() {
+        for mut loop_target in target.loops() {
             let name = ast::Identifier::new(
                 self.ast.new_symbol(loop_target.label().to_string()),
                 span.span(),
@@ -477,6 +533,7 @@ impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
                         format!("while binding loop info for '{}'", name.value()),
                     )
                 })?;
+            loop_target.ensure_label_is_present();
         }
         Ok(())
     }
@@ -506,7 +563,65 @@ impl<'ast, 'ctx, 'blk> SpecCodegen<'ast, 'ctx, 'blk> {
             poly::unifiable_cast(location, value, requested)
         };
 
-        self.top_mut().append_operation_with_result(op)
+        self.insert_op_with_result(op)
+    }
+
+    /// Returns a constant index operation.
+    pub fn constant_index_op(
+        &mut self,
+        location: Location<'ctx>,
+        value: i64,
+    ) -> Result<Value<'ctx, 'blk>, CompileError> {
+        let op = arith::constant(
+            self.context(),
+            IntegerAttribute::new(Type::index(self.context()), value).into(),
+            location,
+        );
+        self.insert_op_with_result(op)
+    }
+
+    /// Creates IR that fills an array of felts with values from the range between the two expressions.
+    ///
+    /// Return a value pointing to the array.
+    pub fn fill_array_with_range(
+        &mut self,
+        location: Location<'ctx>,
+        from: Value<'ctx, 'blk>,
+        to: Value<'ctx, 'blk>,
+    ) -> Result<Value<'ctx, 'blk>, CompileError> {
+        // Create an affine map that computes `to` - `from` to get the size of the array.
+        let s0 = AffineExpr::symbol(self.context(), 0);
+        let s1 = AffineExpr::symbol(self.context(), 1);
+        let map = AffineMap::new(self.context(), 0, 2, &[s1 - s0]);
+        let arr_type = ArrayType::new(self.felt_type(), &[map.into()]);
+        let from_index = self.cast_if_necessary(from, Type::index(self.context()), location)?;
+        let to_index = self.cast_if_necessary(to, Type::index(self.context()), location)?;
+        let range = OwningValueRange::from([from_index, to_index].as_slice());
+        let arr = array::new(
+            self.builder(),
+            location,
+            arr_type,
+            array::ArrayCtor::MapDimSlice(&[(&range).try_into().unwrap()], &[0]),
+        );
+        let arr = self.insert_op_with_result(arr)?;
+        let region = Region::new();
+        let block = region.append_block(Block::new(&[(Type::index(self.context()), location)]));
+        self.push(block);
+        {
+            // %felt_iv = cast.tofelt %iv
+            // %arr[%iv - %from_index] = %felt_iv
+            let iv = block.argument(0).unwrap();
+            let idx = self.insert_op_with_result(arith::subi(iv.into(), from_index, location))?;
+            let felt_iv = self.cast_if_necessary(iv.into(), self.felt_type(), location)?;
+            self.insert_op(array::write(location, arr, &[idx], felt_iv));
+            self.insert_op(scf::r#yield(&[], location));
+        }
+        self.pop();
+        let const_one = self.constant_index_op(location, 1)?;
+        self.insert_op(scf::r#for(
+            from_index, to_index, const_one, region, location,
+        ));
+        Ok(arr)
     }
 }
 

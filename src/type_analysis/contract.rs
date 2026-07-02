@@ -1,5 +1,4 @@
 use std::{
-    borrow::Cow,
     marker::PhantomData,
     ops::{Deref, DerefMut},
 };
@@ -77,43 +76,52 @@ where
         self.ctx.scope().push_local_limit(());
 
         // Fill the scope with template parameters
-        for info in info.template_params().filter(|info| info.r#type.is_some()) {
+        for info in info.template_params() {
             let name = self.ident(info.name, decl);
-            diags.extract_type_result(
-                self.ctx
-                    .scope()
-                    .top()
-                    .bind_local(&name, info.r#type.unwrap()),
-                || format!("while binding template parameter '{}'", info.name),
-            );
+            let ty = info.r#type.unwrap_or_else(|| self.ctx.ts().felt_type());
+            diags.extract_type_result(self.ctx.scope().top().bind_local(&name, ty), || {
+                format!("while binding template parameter '{}'", info.name)
+            });
         }
 
         // Fill the scope with input arguments as parameters (with the param number)
         for (n, t) in info.inputs().enumerate() {
             inputs.push(t.r#type.clone());
-            let name = t
-                .name
-                .map(Cow::Borrowed)
-                .unwrap_or_else(|| Cow::Owned(format!("$arg[{n}]")));
-            let name = self.ident(&name, decl);
+            let positional_name = self.ident(&format!("$arg[{n}]"), decl);
             diags.extract_type_result(
-                self.ctx.scope().top().bind_parameter(&name, t.r#type, n),
+                self.ctx
+                    .scope()
+                    .top()
+                    .bind_parameter(&positional_name, t.r#type.clone(), n),
                 || format!("while binding input #{n}"),
             );
+            if let Some(name) = t.name {
+                let name = self.ident(name, decl);
+                diags.extract_type_result(
+                    self.ctx.scope().top().bind_local(&name, t.r#type),
+                    || format!("while binding named input '{}'", name.value()),
+                );
+            }
         }
         // Fill the scope with outputs in declaration order. These must be done after the inputs s.t. they
         // are in the correct order in the `inputs` vector.
         for (n, t) in info.outputs().enumerate() {
             inputs.push(t.r#type.clone());
-            let name = t
-                .name
-                .map(Cow::Borrowed)
-                .unwrap_or_else(|| Cow::Owned(format!("$res[{n}]")));
-            let name = self.ident(&name, decl);
+            let positional_name = self.ident(&format!("$res[{n}]"), decl);
             diags.extract_type_result(
-                self.ctx.scope().top().bind_output(&name, t.r#type, n),
+                self.ctx
+                    .scope()
+                    .top()
+                    .bind_output(&positional_name, t.r#type.clone(), n),
                 || format!("while binding output #{n}"),
             );
+            if let Some(name) = t.name {
+                let name = self.ident(name, decl);
+                diags.extract_type_result(
+                    self.ctx.scope().top().bind_local(&name, t.r#type),
+                    || format!("while binding named output '{}'", name.value()),
+                );
+            }
         }
         // Fill the scope with the struct members.
         for member in info.members() {
@@ -153,7 +161,6 @@ where
             .from_other_result(self.info.find_contract_target(decl.target()), |err| {
                 format!("in contract declaration: {err}")
             })?;
-
         let inputs = self.push_and_bind(decl, target_info, &mut diags);
         let mut block_tc = BlockTypeChecker::new(self.source_name, self.ctx, Self::block_cfg());
         let body = diags.extract_result(decl.body().accept(&mut block_tc));

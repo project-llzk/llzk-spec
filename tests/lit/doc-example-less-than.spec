@@ -4,7 +4,7 @@
 
 contract for LessThan::LessThan {
   require n <= 252;
-  ensure out == 1 ? arg[0][0] < arg[0][1] : arg[0][0] >= arg[0][1];
+  ensure out == 1 ? $arg[0][0] < $arg[0][1] : $arg[0][0] >= $arg[0][1];
 }
 
 // CHECK-DAG: "name": "LessThan::LessThan"

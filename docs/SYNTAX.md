@@ -46,17 +46,44 @@ contract for Parent {
 Template params and `poly.expr` names that are visible from the target are also
 referenced directly by name.
 
-### Unnamed function inputs
+### Function inputs
 
-If the LLZK IR does not expose a usable input symbol name using the `function.arg_name` attribute, use `arg[N]`:
+`$arg[N]` always refers to the N-th contract input:
 
 ```spec
 contract for IsZero::IsZero {
-  ensure arg[0] == 0 ? out == 1 : out == 0;
+  ensure $arg[0] == 0 ? out == 1 : out == 0;
 }
 ```
 
-`arg[N]` is zero-based (matches `@compute` and `@product` functions) from the spec author’s point of view.
+If the LLZK IR carries a `function.arg_name` attribute, that same input is also
+available by its bare name (i.e. the name "in" below):
+
+```spec
+contract for Num2Bits::Num2Bits {
+  ensure in == $arg[0];
+}
+```
+
+`$arg[N]` is zero-based (matches `@compute` and `@product` functions) from the spec author’s point of view.
+
+`$res[N]` always refers to the N-th contract output when the target is a free
+function:
+
+```spec
+contract for foo {
+  ensure $res[0] == $res[0];
+}
+```
+
+If the LLZK IR carries a `function.res_name` attribute, that same output is also
+available by its bare name (i.e. the name "out" below)::
+
+```spec
+contract for foo {
+  ensure out == $res[0];
+}
+```
 
 ### Escaped identifiers
 
@@ -94,7 +121,7 @@ ensure out == 0 || out == 1;
 Local bindings:
 
 ```spec
-let bit_i = (arg[0] & 2 ** i) != 0 ? 1 : 0;
+let bit_i = ($arg[0] & 2 ** i) != 0 ? 1 : 0;
 ```
 
 You can also bind `nondet`:
@@ -333,7 +360,10 @@ The current implementation is intentionally structural.
 
 - It validates symbol existence and visibility, not full semantic correctness.
 - It does not yet lower specs into MLIR (dependent on `verif` dialect implementation).
-- Named LLZK function inputs (`function.arg_name`) are not yet supported in llzk-lib.
+- `$arg[N]` always addresses contract inputs positionally.
+- `$res[N]` always addresses contract outputs positionally.
+- Bare input names are additionally available when the LLZK IR carries a
+  `function.arg_name` attribute.
 - Nested `struct.type` access checks public visibility, but this is still name-
   and shape-based validation rather than deep type reasoning.
 - Diagnostics and examples should be treated as the source of truth over any
