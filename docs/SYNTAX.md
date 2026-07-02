@@ -57,7 +57,7 @@ contract for IsZero::IsZero {
 ```
 
 If the LLZK IR carries a `function.arg_name` attribute, that same input is also
-available by its bare name:
+available by its bare name (i.e. the name "in" below):
 
 ```spec
 contract for Num2Bits::Num2Bits {
